@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-test('web app shows the API and database as healthy', async ({ page }) => {
-  await page.goto('/');
+test('status page shows the API and database as healthy', async ({ page }) => {
+  await page.goto('/status');
   await expect(page.getByRole('heading', { name: 'Construction ERP' })).toBeVisible();
   await expect(page.getByText('Running', { exact: true })).toBeVisible();
   await expect(page.getByText('Connected', { exact: true })).toBeVisible();
@@ -18,5 +18,9 @@ test('API health is reachable through the web server', async ({ request }) => {
 test('unknown routes fall back to the app, not a server error', async ({ page }) => {
   const res = await page.goto('/some/deep/link');
   expect(res?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'Construction ERP' })).toBeVisible();
+  // Signed out: sign in first (the app does not reveal which addresses exist).
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue as demo user' }).click();
+  // Signed in: a friendly not-found page.
+  await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
 });
