@@ -1,0 +1,27 @@
+{
+  "name": "@erp/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "bundle": "expo export --platform android --output-dir dist"
+  },
+  "dependencies": {
+    "expo": "~58.0.26",
+    "expo-status-bar": "~58.0.5",
+    "react": "19.3.0",
+    "react-native": "0.88.1"
+  },
+  "devDependencies": {
+    "@erp/config": "workspace:*",
+    "@types/react": "~19.3.0",
+    "eslint": "10.15.0",
+    "typescript": "~6.0.3"
+  }
+}

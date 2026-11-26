@@ -1,0 +1,22 @@
+// Construction ERP database schema. See docs/DATA_MODEL.md.
+// Conventions: table names snake_case plural via @@map, money as BigInt paise,
+// quantities as Decimal, ids as UUID, every table has created_at/updated_at.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// One row per seed script that has been applied, so seeds run once and can be re-run safely.
+model SeedRun {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(3)
+
+  @@map("seed_runs")
+}
