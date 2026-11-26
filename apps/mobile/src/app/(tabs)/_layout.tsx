@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Redirect } from 'expo-router';
+import { Redirect, usePathname } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
 import { type IconName } from '@/components/ui';
 import { useSession } from '@/state/session';
@@ -15,7 +15,9 @@ const TABS: { name: string; title: string; icon: IconName; iconActive: IconName 
 /** Signed-in area: four tabs at the bottom, within thumb reach. Signed-out users go to login. */
 export default function TabsLayout() {
   const session = useSession();
-  if (!session) return <Redirect href="/login" />;
+  const pathname = usePathname();
+  // Remember where a deep link was going, so sign-in can return there.
+  if (!session) return <Redirect href={{ pathname: '/login', params: { next: pathname } }} />;
 
   return (
     <Tabs

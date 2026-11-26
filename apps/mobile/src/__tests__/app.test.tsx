@@ -1,6 +1,6 @@
 import { type ProjectSummary } from '@erp/shared';
 import { act, fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
-import { StyleSheet } from 'react-native';
+import { AccessibilityInfo, StyleSheet } from 'react-native';
 import CaptureScreen from '@/app/(tabs)/capture';
 import TabsLayout from '@/app/(tabs)/_layout';
 import TodayScreen from '@/app/(tabs)/index';
@@ -10,6 +10,7 @@ import RootLayout from '@/app/_layout';
 import LoginScreen from '@/app/login';
 import { setProjectsSource } from '@/data/projects';
 import { sessionStore, startDemoSession } from '@/state/session';
+import { currentSiteStore } from '@/state/site';
 import { syncStore } from '@/state/sync';
 import { setNetwork } from '@/test/netinfo-mock';
 import { TOUCH_TARGET } from '@/theme';
@@ -39,14 +40,14 @@ describe('sign-in', () => {
     expect(await screen.findByText('Enter your username or email.')).toBeOnTheScreen();
     expect(screen.getByText('Enter your password.')).toBeOnTheScreen();
     // Typing clears that field's error.
-    await fireEvent.changeText(screen.getByLabelText('Username or email'), 'asha');
+    await fireEvent.changeText(screen.getByLabelText('Username or email, required'), 'asha');
     expect(screen.queryByText('Enter your username or email.')).not.toBeOnTheScreen();
   });
 
   it('does not accept a password yet, and says so', async () => {
     await renderApp('/login');
-    await fireEvent.changeText(await screen.findByLabelText('Username or email'), 'asha');
-    await fireEvent.changeText(screen.getByLabelText('Password'), 'secret');
+    await fireEvent.changeText(await screen.findByLabelText('Username or email, required'), 'asha');
+    await fireEvent.changeText(screen.getByLabelText('Password, required'), 'secret');
     await fireEvent.press(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByText(/next phase/)).toBeOnTheScreen();
     expect(sessionStore.get()).toBeNull();
@@ -145,9 +146,85 @@ describe('tabs', () => {
     await renderApp('/more');
     expect(await screen.findByText('Accounts and finance')).toBeOnTheScreen();
     expect(screen.getByText('Demo data')).toBeOnTheScreen();
+    await act(async () => {
+      currentSiteStore.set('PRJ-001');
+      syncStore.set({ pending: 2, state: 'error', lastSyncedAt: null });
+    });
     await fireEvent.press(screen.getByRole('button', { name: 'Sign out' }));
     await waitFor(() => expect(screen).toHavePathname('/login'));
     expect(sessionStore.get()).toBeNull();
+    // Nothing of this user's is left for the next person on the phone.
+    expect(currentSiteStore.get()).toBeNull();
+    expect(syncStore.get()).toEqual({ pending: 0, state: 'idle', lastSyncedAt: null });
+  });
+});
+
+describe('review fixes', () => {
+  it('a deep link opened while signed out returns there after sign-in', async () => {
+    await renderApp('/sync');
+    await screen.findByRole('header', { name: 'Sign in' });
+    expect(screen).toHavePathname('/login');
+    await fireEvent.press(screen.getByRole('button', { name: 'Continue as demo user' }));
+    expect(await screen.findByText('Waiting to send')).toBeOnTheScreen();
+    expect(screen).toHavePathname('/sync');
+  });
+
+  it('an unknown "next" target falls back to Today', async () => {
+    await renderApp('/login?next=%2F%2Fevil');
+    await fireEvent.press(await screen.findByRole('button', { name: 'Continue as demo user' }));
+    expect(await screen.findByText('Hello, Demo')).toBeOnTheScreen();
+    expect(screen).toHavePathname('/');
+  });
+
+  it('the screen reader announces going offline and login errors (iOS and Android)', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await renderApp('/login');
+    await fireEvent.press(await screen.findByRole('button', { name: 'Sign in' }));
+    await waitFor(() => expect(announce).toHaveBeenCalledWith('Enter your username or email.'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Continue as demo user' }));
+    await screen.findByText('Hello, Demo');
+    await act(async () => setNetwork({ isConnected: false }));
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith(expect.stringMatching(/^You are offline/)),
+    );
+    announce.mockRestore();
+  });
+
+  it('a newly opened tab shows the offline banner from its first render', async () => {
+    startDemoSession();
+    await renderApp('/');
+    await screen.findByText('Hello, Demo');
+    await act(async () => setNetwork({ isConnected: false }));
+    await screen.findByText(/You are offline/);
+    await fireEvent.press(screen.getByLabelText('More'));
+    // getAllBy (not findBy): it must already be there, with no "Checking…" frame in between.
+    expect(screen.getAllByText(/You are offline/).length).toBeGreaterThan(0);
+  });
+
+  it('Sync now is never an enabled button that does nothing', async () => {
+    startDemoSession();
+    syncStore.set({ pending: 2, state: 'idle', lastSyncedAt: null });
+    await renderApp('/sync');
+    expect(await screen.findByText(/Sending by hand arrives in phase 28/)).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Sync now' })).toBeDisabled();
+  });
+
+  it('after a failed sync the screen does not ask the user to retry by hand', async () => {
+    startDemoSession();
+    syncStore.set({ pending: 0, state: 'error', lastSyncedAt: null });
+    await renderApp('/sync');
+    expect(
+      await screen.findAllByText('The last sync failed. It will try again by itself.'),
+    ).not.toHaveLength(0);
+    expect(screen.queryByText('Nothing is waiting to be sent.')).not.toBeOnTheScreen();
+  });
+
+  it('while syncing, the button shows it is busy and says why', async () => {
+    startDemoSession();
+    syncStore.set({ pending: 1, state: 'syncing', lastSyncedAt: null });
+    await renderApp('/sync');
+    expect(await screen.findByText('Sending now…')).toBeOnTheScreen();
+    expect(screen.getByRole('button', { name: 'Sync now' })).toBeBusy();
   });
 });
 

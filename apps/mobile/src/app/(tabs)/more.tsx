@@ -1,17 +1,14 @@
 import { defaultBranding, visibleDepartments } from '@erp/shared';
 import Constants from 'expo-constants';
-import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { Screen } from '@/components/Screen';
 import { AppText, Badge, Button, Card } from '@/components/ui';
 import { isDemoMode } from '@/lib/demo';
 import { signOut, useSession } from '@/state/session';
-import { currentSiteStore } from '@/state/site';
 import { colors, space } from '@/theme';
 
 export default function MoreScreen() {
   const session = useSession();
-  const router = useRouter();
   if (!session) return null;
   const departments = visibleDepartments(session.access);
 
@@ -43,16 +40,7 @@ export default function MoreScreen() {
         <AppText variant="caption">
           {defaultBranding.productName} · version {Constants.expoConfig?.version ?? 'unknown'}
         </AppText>
-        <Button
-          label="Sign out"
-          variant="danger"
-          icon="log-out-outline"
-          onPress={() => {
-            signOut();
-            currentSiteStore.set(null);
-            router.replace('/login');
-          }}
-        />
+        <Button label="Sign out" variant="danger" icon="log-out-outline" onPress={signOut} />
       </View>
     </Screen>
   );

@@ -1,12 +1,21 @@
 import { defaultBranding, loginFormSchema } from '@erp/shared';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  type TextInputInstance,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TextField } from '@/components/TextField';
 import { AppText, Button, Card } from '@/components/ui';
+import { useAnnounce } from '@/lib/announce';
 import { isDemoMode } from '@/lib/demo';
+import { safeNextRoute } from '@/lib/next-route';
 import { startDemoSession, useSession } from '@/state/session';
 import { colors, radii, space } from '@/theme';
 
@@ -21,8 +30,12 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<Errors>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const { next } = useLocalSearchParams<{ next?: string }>();
+  const passwordRef = useRef<TextInputInstance>(null);
+  // VoiceOver/TalkBack: read out the first error after a failed submit, and any notice.
+  useAnnounce(notice ?? errors.username ?? errors.password);
 
-  if (session) return <Redirect href="/" />;
+  if (session) return <Redirect href={safeNextRoute(next)} />;
 
   const submit = () => {
     const result = loginFormSchema.safeParse({ username, password });
@@ -79,7 +92,7 @@ export default function LoginScreen() {
                 size="lg"
                 onPress={() => {
                   startDemoSession();
-                  router.replace('/');
+                  router.replace(safeNextRoute(next));
                 }}
               />
             </Card>
@@ -99,9 +112,12 @@ export default function LoginScreen() {
               autoComplete="username"
               textContentType="username"
               returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => passwordRef.current?.focus()}
               error={errors.username}
             />
             <TextField
+              ref={passwordRef}
               label="Password"
               required
               value={password}

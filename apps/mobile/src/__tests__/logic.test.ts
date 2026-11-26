@@ -1,5 +1,7 @@
 import { lightColors, tokens } from '@erp/shared';
+import { demoProjectsSource } from '@/data/projects';
 import { isDemoMode } from '@/lib/demo';
+import { safeNextRoute } from '@/lib/next-route';
 import { connectivityOf } from '@/state/network';
 import { type SyncStatus, describeSync } from '@/state/sync';
 import { PRIMARY_TOUCH_TARGET, TOUCH_TARGET, colors, space, text } from '@/theme';
@@ -50,7 +52,7 @@ describe('describeSync', () => {
       tone: 'danger',
     });
     expect(describeSync({ ...idle, state: 'error' }, 'online').description).toBe(
-      'The last sync failed. Try again.',
+      'The last sync failed. It will try again by itself.',
     );
     expect(describeSync({ ...idle, pending: 4 }, 'online').label).toBe('4 to send');
     expect(describeSync(idle, 'online')).toMatchObject({
@@ -95,7 +97,40 @@ describe('isDemoMode', () => {
     process.env.EXPO_PUBLIC_DEMO_MODE = 'false';
     expect(isDemoMode()).toBe(false);
     delete process.env.EXPO_PUBLIC_DEMO_MODE;
-    // Jest runs as a development build (__DEV__ is true).
-    expect(isDemoMode()).toBe(__DEV__);
+  });
+
+  it('unset flag: on in a development build, off in a release build', () => {
+    const g = globalThis as { __DEV__?: boolean };
+    const original = g.__DEV__;
+    try {
+      g.__DEV__ = true;
+      expect(isDemoMode()).toBe(true);
+      g.__DEV__ = false;
+      expect(isDemoMode()).toBe(false);
+    } finally {
+      g.__DEV__ = original;
+    }
+  });
+
+  it('with demo mode off, the demo site list is empty (no fake data in a release build)', async () => {
+    process.env.EXPO_PUBLIC_DEMO_MODE = 'false';
+    expect(await demoProjectsSource.list()).toEqual([]);
+    process.env.EXPO_PUBLIC_DEMO_MODE = 'true';
+    expect((await demoProjectsSource.list()).length).toBeGreaterThan(0);
+  });
+});
+
+describe('safeNextRoute', () => {
+  it.each([
+    ['/sync', '/sync'],
+    ['/more', '/more'],
+    [['/capture'], '/capture'],
+    ['/login', '/'],
+    ['//evil', '/'],
+    ['https://evil.example', '/'],
+    [undefined, '/'],
+    ['', '/'],
+  ] as const)('%j -> %s', (input, expected) => {
+    expect(safeNextRoute(input)).toBe(expected);
   });
 });

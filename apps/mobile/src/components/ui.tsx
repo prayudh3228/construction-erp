@@ -10,6 +10,7 @@ import {
   View,
   type ViewProps,
 } from 'react-native';
+import { useAnnounce } from '@/lib/announce';
 import { PRIMARY_TOUCH_TARGET, TOUCH_TARGET, colors, radii, shadow, space, text } from '@/theme';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
@@ -147,6 +148,7 @@ export function ErrorState({
   description,
   onRetry,
 }: Omit<StateProps, 'icon' | 'action'> & { onRetry?: () => void }) {
+  useAnnounce(description ? `${title}. ${description}` : title);
   return (
     <View style={[styles.state, styles.error]} accessibilityRole="alert">
       <Ionicons name="alert-circle-outline" size={32} color={colors.danger} />

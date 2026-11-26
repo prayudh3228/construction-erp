@@ -1,6 +1,8 @@
 import { type DepartmentAccess } from '@erp/shared';
 import { DEMO_USER } from '@erp/shared/demo';
 import { createStore, useStore } from '@/lib/store';
+import { currentSiteStore } from './site';
+import { resetSyncStatus } from './sync';
 
 /**
  * TEMPORARY demo session, held in memory only (closing the app signs out). It decides what the UI
@@ -21,7 +23,13 @@ export function startDemoSession(): Session {
   return session;
 }
 
+/**
+ * Sign out and forget everything that belonged to this user, so the next person on the same
+ * phone starts clean. Navigation follows by itself: the tabs layout redirects to login.
+ */
 export function signOut(): void {
+  currentSiteStore.set(null);
+  resetSyncStatus();
   sessionStore.set(null);
 }
 

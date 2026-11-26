@@ -13,7 +13,9 @@ export interface SyncStatus {
   lastSyncedAt: string | null;
 }
 
-export const syncStore = createStore<SyncStatus>({ pending: 0, state: 'idle', lastSyncedAt: null });
+const INITIAL: SyncStatus = { pending: 0, state: 'idle', lastSyncedAt: null };
+export const syncStore = createStore<SyncStatus>(INITIAL);
+export const resetSyncStatus = () => syncStore.set(INITIAL);
 export const useSyncStatus = () => useStore(syncStore);
 
 export type SyncTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
@@ -56,8 +58,8 @@ export function describeSync(status: SyncStatus, connectivity: Connectivity): Sy
       label: 'Sync failed',
       description:
         pending > 0
-          ? `Could not send ${items(pending)}. They are safe on this phone; try again.`
-          : 'The last sync failed. Try again.',
+          ? `Could not send ${items(pending)}. They are safe on this phone and will be sent again.`
+          : 'The last sync failed. It will try again by itself.',
       tone: 'danger',
     };
   }

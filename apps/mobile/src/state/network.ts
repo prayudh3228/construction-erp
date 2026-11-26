@@ -1,5 +1,6 @@
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { createStore, useStore } from '@/lib/store';
 
 export type Connectivity = 'online' | 'offline' | 'unknown';
 
@@ -17,8 +18,29 @@ export function connectivityOf(
   return 'online';
 }
 
+/**
+ * One app-wide value fed by ONE NetInfo listener, shared by every screen. It keeps the last known
+ * value between screens, so opening a tab while offline shows the banner from the first frame.
+ */
+const connectivityStore = createStore<Connectivity>('unknown');
+let users = 0;
+let stopListening: (() => void) | null = null;
+
+function startListening(): () => void {
+  users += 1;
+  if (users === 1) {
+    stopListening = NetInfo.addEventListener((s) => connectivityStore.set(connectivityOf(s)));
+  }
+  return () => {
+    users -= 1;
+    if (users === 0) {
+      stopListening?.();
+      stopListening = null;
+    }
+  };
+}
+
 export function useConnectivity(): Connectivity {
-  const [connectivity, setConnectivity] = useState<Connectivity>('unknown');
-  useEffect(() => NetInfo.addEventListener((s) => setConnectivity(connectivityOf(s))), []);
-  return connectivity;
+  useEffect(startListening, []);
+  return useStore(connectivityStore);
 }

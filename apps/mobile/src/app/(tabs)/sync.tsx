@@ -14,13 +14,15 @@ export default function SyncScreen() {
   const status = useSyncStatus();
   const summary = describeSync(status, connectivity);
 
-  const canSync = connectivity === 'online' && status.pending > 0 && status.state !== 'syncing';
+  // There is no queue to send yet (Phase 28), so the button stays off and always says why.
   const reason =
     connectivity === 'offline'
       ? 'You are offline. Sync starts by itself when you are back online.'
-      : status.pending === 0
-        ? 'Nothing is waiting to be sent.'
-        : undefined;
+      : status.state === 'syncing'
+        ? 'Sending now…'
+        : status.pending === 0 && status.state !== 'error'
+          ? 'Nothing is waiting to be sent.'
+          : 'Sending by hand arrives in phase 28. Until then, sync runs by itself.';
 
   return (
     <Screen title="Sync">
@@ -31,7 +33,7 @@ export default function SyncScreen() {
         </AppText>
       </Card>
 
-      <Card accessibilityLabel="Sync details">
+      <Card>
         <Row label="Connection" value={CONNECTION_LABEL[connectivity]} />
         <Row label="Waiting to send" value={String(status.pending)} />
         <Row
@@ -45,14 +47,13 @@ export default function SyncScreen() {
           label="Sync now"
           icon="sync-outline"
           size="lg"
-          disabled={!canSync}
+          disabled
+          loading={status.state === 'syncing'}
           accessibilityHint={reason}
         />
-        {reason && (
-          <AppText variant="small" style={styles.center}>
-            {reason}
-          </AppText>
-        )}
+        <AppText variant="small" style={styles.center}>
+          {reason}
+        </AppText>
       </View>
 
       <AppText variant="caption" style={styles.center}>

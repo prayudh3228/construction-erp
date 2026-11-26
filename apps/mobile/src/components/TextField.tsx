@@ -1,5 +1,11 @@
-import { useState } from 'react';
-import { StyleSheet, TextInput, type TextInputProps, View } from 'react-native';
+import { type Ref, useState } from 'react';
+import {
+  StyleSheet,
+  TextInput,
+  type TextInputInstance,
+  type TextInputProps,
+  View,
+} from 'react-native';
 import { TOUCH_TARGET, colors, radii, space, text } from '@/theme';
 import { AppText } from './ui';
 
@@ -7,10 +13,19 @@ interface TextFieldProps extends Omit<TextInputProps, 'style'> {
   label: string;
   error?: string;
   required?: boolean;
+  ref?: Ref<TextInputInstance>;
 }
 
 /** Labelled input, 48dp tall, with the error read out as part of the field. */
-export function TextField({ label, error, required, onFocus, onBlur, ...props }: TextFieldProps) {
+export function TextField({
+  label,
+  error,
+  required,
+  onFocus,
+  onBlur,
+  ref,
+  ...props
+}: TextFieldProps) {
   const [focused, setFocused] = useState(false);
   return (
     <View style={styles.wrap}>
@@ -19,7 +34,9 @@ export function TextField({ label, error, required, onFocus, onBlur, ...props }:
         {required && <AppText style={{ color: colors.danger }}> *</AppText>}
       </AppText>
       <TextInput
-        accessibilityLabel={label}
+        ref={ref}
+        // The visual "*" is not read out, so say "required" in the spoken label.
+        accessibilityLabel={required ? `${label}, required` : label}
         accessibilityHint={error}
         aria-invalid={!!error}
         placeholderTextColor={colors['muted-foreground']}

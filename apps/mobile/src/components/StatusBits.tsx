@@ -1,20 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useAnnounce } from '@/lib/announce';
 import { type Connectivity } from '@/state/network';
 import { type SyncSummary } from '@/state/sync';
 import { TOUCH_TARGET, colors, radii, space, text } from '@/theme';
 import { toneOf } from './ui';
 
 /** Full-width warning shown on every screen while the phone has no internet. */
+const OFFLINE_MESSAGE =
+  'You are offline. Keep working; entries are saved on this phone and sent later.';
+
 export function OfflineBanner({ connectivity }: { connectivity: Connectivity }) {
+  useAnnounce(connectivity === 'offline' ? OFFLINE_MESSAGE : null);
   if (connectivity !== 'offline') return null;
   return (
     <View style={styles.banner} accessibilityRole="alert" accessibilityLiveRegion="polite">
       <Ionicons name="cloud-offline-outline" size={20} color={colors['warning-foreground']} />
-      <Text style={[text.small, styles.bannerText]}>
-        You are offline. Keep working; entries are saved on this phone and sent later.
-      </Text>
+      <Text style={[text.small, styles.bannerText]}>{OFFLINE_MESSAGE}</Text>
     </View>
   );
 }
