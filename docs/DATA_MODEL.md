@@ -13,9 +13,11 @@ The source of truth is `apps/api/prisma/schema.prisma`. This file explains the i
 
 ## Tables so far
 
-| Table       | Phase | Purpose                                                     |
-| ----------- | ----- | ----------------------------------------------------------- |
-| `seed_runs` | 0     | Names of demo-data seeds already applied, so seeds run once |
+| Table       | Phase | Purpose                                                                                                                                                                                                                                               |
+| ----------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `seed_runs` | 0     | Names of demo-data seeds already applied, so seeds run once                                                                                                                                                                                           |
+| `users`     | 2a    | People who can sign in. Lower-case unique username and email (database CHECKs), scrypt password hash, provisional `role_key` (replaced in Phase 3), `status` ACTIVE/DEACTIVATED (leavers are never deleted), lockout counters, `must_change_password` |
+| `sessions`  | 2a    | One row per signed-in device: SHA-256 of the token (never the token), `client` WEB/MOBILE, `last_seen_at` (idle timeout), `expires_at` (absolute), `revoked_at` + reason                                                                              |
 
 ## Shared shapes used by the UI before their tables exist (Phase 1)
 
