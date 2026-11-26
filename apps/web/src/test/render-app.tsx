@@ -1,20 +1,26 @@
-import { type DepartmentAccess } from '@erp/shared';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router';
 import { render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { clearSession } from '@/app/auth';
+import { createAppQueryClient } from '@/app/query-client';
 import { createAppRouter } from '@/app/router';
-import { type Session, sessionStore } from '@/app/session';
 
-export function signIn(access: DepartmentAccess = { all: true }, name = 'Test User'): Session {
-  const session: Session = { user: { name, roleLabel: 'Tester' }, access, demo: true };
-  sessionStore.set(session);
-  return session;
-}
+export { signIn } from './fake-auth';
 
-/** Render the real app (routes, shell, pages) at a URL, using in-memory history. */
+/** Render the real app (routes, shell, pages) at a URL, with the same wiring as main.tsx. */
 export function renderApp(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = createAppQueryClient(
+    () => {
+      clearSession(queryClient);
+      const { pathname, href } = router.state.location;
+      if (pathname !== '/login') {
+        void router.navigate({ to: '/login', search: { reason: 'expired', redirect: href } });
+      }
+    },
+    // Same retry rule as the app, without the wait.
+    { retryDelayMs: 0 },
+  );
   const history = createMemoryHistory({ initialEntries: [path] });
   const router = createAppRouter(queryClient, history);
   const user = userEvent.setup();

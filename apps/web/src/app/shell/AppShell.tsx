@@ -9,7 +9,8 @@ import { cn } from '@/lib/cn';
 import { isDemoMode } from '@/lib/env';
 import { readStorage, writeStorage } from '@/lib/storage';
 import { useBranding } from '../branding';
-import { useSession } from '../session';
+import { useSession } from '../auth';
+import { SessionTimeoutWarning } from './SessionTimeoutWarning';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { Sidebar } from './Sidebar';
 import { UserMenu } from './UserMenu';
@@ -118,6 +119,7 @@ export function AppShell() {
               </Badge>
             )}
             <UserMenu session={session} />
+            <SessionTimeoutWarning session={session} />
           </div>
         </header>
 
