@@ -4,11 +4,19 @@ A fresh session should be able to resume from this file alone.
 
 ## Status
 
-- **Current phase:** 1a (Design system and web shell), built on branch `phase-01-design-shells`, awaiting approval.
-- **Next phase:** 1b (Mobile shell: Expo Router tabs Today/Capture/Sync/More, login placeholder, offline banner via NetInfo, sync status pill, shared tokens, 48dp touch targets). Do not start it without approval.
+- **Current phase:** 1b (Mobile shell), built on branch `phase-01b-mobile-shell` (branched from `phase-01-design-shells`, which is not merged yet because the push was refused: wrong GitHub account on this machine), awaiting approval.
+- **Next phase:** 2 (Authentication). Do not start it without approval.
 - Phase 1 was split into 1a (web) and 1b (mobile) because it was too big for one PR.
 
 ## Done
+
+### Phase 1b: Mobile shell (26-11-2026)
+
+- Expo Router app (`apps/mobile/src/app`): login (inline validation with the shared schema, demo sign-in), tabs Today (current site picker, site-action tiles marked with their phase), Capture (camera-first placeholder), Sync (status, waiting count, last synced, Sync now with reasons), More (user, office departments, sign out).
+- Offline banner from NetInfo and a sync status pill on every screen; theme from the shared tokens; 48dp/56dp touch targets.
+- Demo fixtures moved to `@erp/shared/demo` (used by web and mobile).
+- Jest set up for mobile (jest-expo, Testing Library v14, `renderRouter`), 51 tests; mobile tests now run in `pnpm test` and CI.
+- Fresh-eyes review: no blocking bugs; 9 smaller items, 8 fixed: Sync screen contradicted itself after a failed sync and could show an enabled button that did nothing (now always explains, busy while syncing); screen-reader announcements now work on iOS too (`useAnnounce`); deep links opened while signed out return there after sign-in (`?next=`, allow-listed); keyboard Next moves to the password; sign-out clears every per-user store with one navigation; one shared NetInfo listener (no "Checking…" flash on new tabs); stronger demo-mode tests; required fields announced. **Not fixed (minor):** Today's date only refreshes when the screen re-renders, so an app left open overnight can show yesterday until touched.
 
 ### Phase 1a: Design system and web shell (26-11-2026)
 
@@ -54,6 +62,12 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Gotchas
 
+- Mobile: add Expo packages with `pnpm exec expo install <pkg>` (picks SDK-matching versions), run from `apps/mobile`. It is slow on Windows (minutes).
+- Mobile Jest: Testing Library v14 `fireEvent` returns a promise; always `await` it (and `await act(async () => ...)`), or updates leak into the next test. `jest.setup.ts` unmounts before resetting the shared stores.
+- Mobile Jest `transformIgnorePatterns` is the Expo pnpm pattern plus `standard-navigation` (an ESM-only dependency of expo-router).
+- `Tabs` from `expo-router` is deprecated in SDK 58; import it from `expo-router/js-tabs`. `Stack`, `Link`, `Redirect` still come from `expo-router`.
+- To look at the mobile screens without a phone: `EXPO_PUBLIC_DEMO_MODE=true pnpm --filter @erp/mobile exec expo export --platform web --output-dir dist-web`, serve that folder, and open it at phone size. A production export has demo mode off.
+
 - Demo mode is decided at build time. `vite.config.ts` defaults it on for the dev server and tests, off for any `vite build`; Compose passes `VITE_DEMO_MODE=true` (the Dockerfile default is false). In tests, switch it with `vi.stubEnv('VITE_DEMO_MODE', 'false')`.
 - Don't throw `notFound()` from a child route's `beforeLoad`: TanStack Router then renders it in place of the shell. Render `<NotFoundPage />` from the page instead (see DepartmentPage).
 - TanStack Table defaults numeric columns to descending on the first click; the DataTable sets `sortDescFirst: false`. Sort money with a bigint comparator, never by converting to number.
@@ -73,6 +87,7 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Decisions log
 
+- 26-11-2026: Phase 1b built on top of the unmerged 1a branch. System font on mobile (A25), single current site on the phone (A26).
 - 26-11-2026: Phase 1 split into 1a (web) and 1b (mobile). TanStack Table v8 over v9 (A15). Demo mode build flag (A19). Q4 assumed: GitHub Actions is the gate, plus a full local run before each PR.
 
 - 26-11-2026: data-model questions unanswered; proceeding on assumptions A1 to A7 (see ASSUMPTIONS.md, Q1).
