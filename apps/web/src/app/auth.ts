@@ -19,7 +19,8 @@ export interface AuthClient {
   login(username: string, password: string): Promise<LoginResponse>;
   demoLogin(username: string): Promise<LoginResponse>;
   logout(): Promise<void>;
-  changePassword(currentPassword: string, newPassword: string): Promise<MeResponse>;
+  /** Opens a fresh session (new cookie) and returns it. */
+  changePassword(currentPassword: string, newPassword: string): Promise<LoginResponse>;
 }
 
 export const httpAuthClient: AuthClient = {
@@ -48,7 +49,7 @@ export const httpAuthClient: AuthClient = {
     apiFetch('/auth/change-password', {
       method: 'POST',
       body: { currentPassword, newPassword },
-      schema: meResponseSchema,
+      schema: loginResponseSchema,
     }),
 };
 

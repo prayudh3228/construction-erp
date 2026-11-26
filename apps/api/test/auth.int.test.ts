@@ -147,6 +147,25 @@ describe('sign-in', () => {
     expect(res.body.details.length).toBeGreaterThan(0);
   });
 
+  it('accepts the email address instead of the username', async () => {
+    const user = await makeUser();
+    const res = await login(` ${user.email!.toUpperCase()} `).expect(200);
+    expect(res.body.user.id).toBe(user.id);
+  });
+
+  it('signing in over an existing session ends the old one on the server (shared PC)', async () => {
+    const first = await makeUser();
+    const second = await makeUser();
+    const old = sessionCookie(await login(first.username).expect(200));
+    await http()
+      .post('/api/auth/login')
+      .set('x-erp-client', 'web')
+      .set('Cookie', old)
+      .send({ username: second.username, password: PASSWORD })
+      .expect(200);
+    await http().get('/api/auth/me').set('Cookie', old).expect(401);
+  });
+
   it('upgrades an old password hash at the next successful sign-in', async () => {
     const user = await makeUser({ cost: 11 });
     await login(user.username).expect(200);
@@ -178,6 +197,30 @@ describe('lockout', () => {
     await login(user.username).expect(200);
     for (let i = 0; i < 4; i++) await login(user.username, 'wrong password here').expect(401);
     await login(user.username).expect(200);
+  });
+
+  it('every try is reserved before the password check: none left means no check at all', async () => {
+    // As if 5 attempts were in flight right now: even the right password must be refused.
+    const user = await makeUser();
+    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 5 } });
+    await login(user.username).expect(401);
+    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 4 } });
+    await login(user.username).expect(200);
+  });
+
+  it('a parallel burst gets at most 5 password checks, so a correct guess in it cannot win', async () => {
+    const user = await makeUser();
+    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 4 } });
+    // One try left: of 10 parallel requests (9 wrong, 1 right) only the first to reserve is checked.
+    const results = await Promise.all([
+      ...Array.from({ length: 9 }, () => login(user.username, 'wrong password here')),
+      login(user.username),
+    ]);
+    const successes = results.filter((r) => r.status === 200).length;
+    expect(successes).toBeLessThanOrEqual(1);
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    // Either the right one won (count reset) or a wrong one used the last try (locked).
+    expect(successes === 1 ? after.failedLoginCount === 0 : after.lockedUntil !== null).toBe(true);
   });
 
   it('parallel wrong attempts still lock the account', async () => {
@@ -326,14 +369,56 @@ describe('password change', () => {
     expect(same.body.details.join(' ')).toMatch(/different from your current/);
   });
 
-  it('works, keeps this session, signs out other devices', async () => {
+  it('works: every old session ends, this device continues on a NEW session', async () => {
     const { user, cookie, change } = await signedIn();
     const other = sessionCookie(await login(user.username).expect(200));
-    await change(PASSWORD, 'brand new lantern 58').expect(200);
-    await http().get('/api/auth/me').set('Cookie', cookie).expect(200);
+    const res = await change(PASSWORD, 'brand new lantern 58').expect(200);
+    const fresh = sessionCookie(res);
+    expect(fresh).not.toBe(cookie);
+    await http().get('/api/auth/me').set('Cookie', fresh).expect(200);
+    // The token used to make the change is worthless now (no session fixation).
+    await http().get('/api/auth/me').set('Cookie', cookie).expect(401);
     await http().get('/api/auth/me').set('Cookie', other).expect(401);
     await login(user.username).expect(401);
     await login(user.username, 'brand new lantern 58').expect(200);
+  });
+
+  it('mobile gets its new token in the answer', async () => {
+    const user = await makeUser();
+    const { token } = (await login(user.username, PASSWORD, 'mobile').expect(200)).body;
+    const res = await http()
+      .post('/api/auth/change-password')
+      .set('x-erp-client', 'mobile')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: PASSWORD, newPassword: 'brand new lantern 58' })
+      .expect(200);
+    expect(res.body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(res.body.token).not.toBe(token);
+    await http().get('/api/auth/me').set('Authorization', `Bearer ${res.body.token}`).expect(200);
+    await http().get('/api/auth/me').set('Authorization', `Bearer ${token}`).expect(401);
+  });
+
+  it('wrong current passwords count towards the lockout; at the limit every session ends', async () => {
+    const { user, cookie, change } = await signedIn();
+    for (let i = 0; i < 4; i++) {
+      const res = await change('not my password', 'brand new lantern 58');
+      expect(res.body.code).toBe('WRONG_CURRENT_PASSWORD');
+    }
+    // The 5th wrong guess locks the account and ends the (possibly stolen) session.
+    await change('not my password', 'brand new lantern 58').expect(401);
+    await http().get('/api/auth/me').set('Cookie', cookie).expect(401);
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(after.lockedUntil).not.toBeNull();
+    await login(user.username).expect(401);
+  });
+
+  it('a session opened before the last password change is void (sign-in racing a change)', async () => {
+    const user = await makeUser();
+    const cookie = sessionCookie(await login(user.username).expect(200));
+    // As if the password changed after this session was created, without revoking it.
+    clock.advance(1000);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordChangedAt: clock.now() } });
+    await http().get('/api/auth/me').set('Cookie', cookie).expect(401);
   });
 
   it('a user who must change their password can do only that until they do', async () => {
@@ -345,7 +430,49 @@ describe('password change', () => {
 
     const changed = await change(PASSWORD, 'brand new lantern 58').expect(200);
     expect(changed.body.user.mustChangePassword).toBe(false);
-    await http().get('/api/auth/sessions').set('Cookie', cookie).expect(200);
+    await http().get('/api/auth/sessions').set('Cookie', sessionCookie(changed)).expect(200);
+  });
+});
+
+describe('per-address throttling', () => {
+  it('a source that keeps failing is refused before any password check, even with the right one', async () => {
+    const strict = await createTestApp({ AUTH_IP_MAX_FAILURES: 5, AUTH_MAX_FAILED_LOGINS: 20 });
+    try {
+      const user = await makeUser();
+      const attempt = (password: string) =>
+        request(strict.getHttpServer())
+          .post('/api/auth/login')
+          .set('x-erp-client', 'web')
+          .send({ username: user.username, password });
+      // Made-up usernames count too (they never lock an account, so they must count here).
+      for (let i = 0; i < 5; i++) {
+        await request(strict.getHttpServer())
+          .post('/api/auth/login')
+          .set('x-erp-client', 'web')
+          .send({ username: `${PREFIX}ghost${i}`, password: 'x' })
+          .expect(401);
+      }
+      const res = await attempt(PASSWORD).expect(429);
+      expect(res.body.code).toBe('TOO_MANY_ATTEMPTS');
+    } finally {
+      await strict.close();
+    }
+  });
+
+  it('successful sign-ins do not count, so an office on one address is never blocked', async () => {
+    const strict = await createTestApp({ AUTH_IP_MAX_FAILURES: 5 });
+    try {
+      const user = await makeUser();
+      for (let i = 0; i < 8; i++) {
+        await request(strict.getHttpServer())
+          .post('/api/auth/login')
+          .set('x-erp-client', 'web')
+          .send({ username: user.username, password: PASSWORD })
+          .expect(200);
+      }
+    } finally {
+      await strict.close();
+    }
   });
 });
 

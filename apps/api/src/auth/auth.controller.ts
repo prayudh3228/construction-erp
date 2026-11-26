@@ -1,6 +1,18 @@
-import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  AUTH_ERROR_CODES,
   type DeviceSession,
   type LoginResponse,
   type MeResponse,
@@ -10,9 +22,11 @@ import {
 } from '@erp/shared';
 import { type Request, type Response } from 'express';
 import { z } from 'zod';
-import { parseBody } from '../common/api-error';
+import { apiError, parseBody } from '../common/api-error';
 import { ENV } from '../config/config.module';
 import { type Env, cookieSecure } from '../config/env';
+import { AttemptLimiter } from './attempt-limiter';
+import { tokenFromRequest } from './auth.guard';
 import { type Authenticated, AuthService, type RequestMeta } from './auth.service';
 import { clientKind } from './client-header.middleware';
 import { AllowWhilePasswordChangeRequired, CurrentAuth, Public } from './decorators';
@@ -24,8 +38,32 @@ const demoLoginSchema = z.object({ username: z.string().trim().min(1).max(120) }
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
+    private readonly limiter: AttemptLimiter,
     @Inject(ENV) private readonly env: Env,
   ) {}
+
+  /**
+   * Run a sign-in style action with per-address throttling: a source that keeps failing is
+   * refused (429) before any password is checked. Only failures count, so an office signing in
+   * correctly from one shared address is never blocked.
+   */
+  private async throttled<T>(req: Request, action: () => Promise<T>): Promise<T> {
+    const key = req.ip ?? 'unknown';
+    if (this.limiter.isBlocked(key)) {
+      throw apiError(
+        HttpStatus.TOO_MANY_REQUESTS,
+        AUTH_ERROR_CODES.tooManyAttempts,
+        'Too many failed attempts from this network. Please wait a few minutes and try again.',
+      );
+    }
+    try {
+      return await action();
+    } catch (error) {
+      const status = error instanceof HttpException ? error.getStatus() : 500;
+      if (status === 400 || status === 401) this.limiter.recordFailure(key);
+      throw error;
+    }
+  }
 
   @Public()
   @Post('login')
@@ -42,7 +80,11 @@ export class AuthController {
   ): Promise<LoginResponse> {
     const { username, password } = parseBody(loginRequestSchema, body);
     const client = clientKind(req) ?? 'web';
-    const result = await this.auth.login(username, password, client, meta(req));
+    const result = await this.throttled(req, () =>
+      this.auth.login(username, password, client, meta(req)),
+    );
+    // Signing in over someone else's session (shared PC): end the old one on the server too.
+    await this.auth.revokeToken(tokenFromRequest(req), 'replaced_by_new_sign_in');
     return this.respondWithSession(result, client, res);
   }
 
@@ -57,7 +99,10 @@ export class AuthController {
   ): Promise<LoginResponse> {
     const { username } = parseBody(demoLoginSchema, body);
     const client = clientKind(req) ?? 'web';
-    const result = await this.auth.demoLogin(username, client, meta(req));
+    const result = await this.throttled(req, () =>
+      this.auth.demoLogin(username, client, meta(req)),
+    );
+    await this.auth.revokeToken(tokenFromRequest(req), 'replaced_by_new_sign_in');
     return this.respondWithSession(result, client, res);
   }
 
@@ -89,14 +134,27 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(200)
   @AllowWhilePasswordChangeRequired()
-  @ApiOperation({ summary: 'Change your password; signs out your other devices' })
+  @ApiOperation({
+    summary: 'Change your password',
+    description:
+      'Ends every session of the user, including this one, and opens a new one: web gets a new cookie, mobile gets a new token in the body.',
+  })
   async changePassword(
     @CurrentAuth() auth: Authenticated,
     @Body() body: unknown,
-  ): Promise<MeResponse> {
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginResponse> {
     const { currentPassword, newPassword } = parseBody(changePasswordRequestSchema, body);
-    const user = await this.auth.changePassword(auth, currentPassword, newPassword);
-    return { user: this.auth.toAuthUser(user), session: this.auth.sessionInfo(auth.session) };
+    const result = await this.throttled(req, () =>
+      this.auth.changePassword(auth, currentPassword, newPassword, meta(req)),
+    );
+    // For the web the new cookie simply replaces the old one.
+    return this.respondWithSession(
+      result,
+      result.session.client === 'MOBILE' ? 'mobile' : 'web',
+      res,
+    );
   }
 
   private respondWithSession(

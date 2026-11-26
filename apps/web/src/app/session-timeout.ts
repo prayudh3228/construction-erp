@@ -1,7 +1,13 @@
 import { type SessionInfo } from '@erp/shared';
 
-/** Warn this long before the session ends. More than the server's 1-minute touch interval. */
+/** Warn this long before the session ends. */
 export const WARN_BEFORE_MS = 2 * 60_000;
+
+/**
+ * The server records activity at most once a minute, so its idle deadline can be up to a
+ * minute earlier than "last request + idle timeout". Count down from the earlier time.
+ */
+export const SERVER_TOUCH_SLACK_MS = 60_000;
 
 export type TimeoutState =
   | { kind: 'ok'; msLeft: number }
@@ -16,7 +22,7 @@ export type TimeoutState =
  * successful request (each one extends it on the server); the absolute end never moves.
  */
 export function timeoutState(now: number, lastActivity: number, info: SessionInfo): TimeoutState {
-  const idleEnd = lastActivity + info.idleTimeoutSeconds * 1000;
+  const idleEnd = lastActivity + info.idleTimeoutSeconds * 1000 - SERVER_TOUCH_SLACK_MS;
   const absoluteEnd = Date.parse(info.absoluteExpiresAt);
   const end = Math.min(idleEnd, absoluteEnd);
   const msLeft = end - now;

@@ -48,6 +48,9 @@ export const envSchema = z
       .min(1)
       .max(24 * 60)
       .default(15),
+    /** Failed sign-ins from one network address in AUTH_IP_WINDOW_MINUTES before it is refused. */
+    AUTH_IP_MAX_FAILURES: z.coerce.number().int().min(5).max(10_000).default(30),
+    AUTH_IP_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
     /** Send the session cookie only over HTTPS. Defaults to on in production. */
     AUTH_COOKIE_SECURE: booleanFlag.optional(),
     /** One-click demo sign-in for the seeded demo accounts. Refused in production. */

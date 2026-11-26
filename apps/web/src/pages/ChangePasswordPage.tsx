@@ -68,7 +68,7 @@ export function ChangePasswordPage() {
     setBusy(true);
     try {
       const me = await authClient().changePassword(current, next);
-      queryClient.setQueryData(meQueryKey, me);
+      queryClient.setQueryData(meQueryKey, { user: me.user, session: me.session });
       toast.success('Your password has been changed. Other devices have been signed out.');
       await navigate({ to: '/' });
     } catch (err) {

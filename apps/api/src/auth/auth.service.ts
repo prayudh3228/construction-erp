@@ -15,6 +15,7 @@ import { ENV } from '../config/config.module';
 import { type Env } from '../config/env';
 import { type Session, type User } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { HashGate } from './attempt-limiter';
 import { CLOCK, type Clock } from './clock';
 import { hashPassword, needsRehash, verifyPassword } from './password-hasher';
 import { hashSessionToken, looksLikeSessionToken, newSessionToken } from './session-token';
@@ -33,6 +34,9 @@ export interface Authenticated {
 const SIGN_IN_FAILED =
   'Sign-in failed. Check your username and password. After several failed attempts the account is locked for a while.';
 
+/** A UUID no user has: the attempt query for an unknown username touches no row. */
+const UNKNOWN_USER_ID = '00000000-0000-0000-0000-000000000000';
+
 /** lastSeenAt is written at most once a minute per session, not on every request. */
 const TOUCH_INTERVAL_MS = 60_000;
 
@@ -44,6 +48,8 @@ const DAY = 24 * HOUR;
 export class AuthService {
   /** Hash of a random password, verified for unknown users so failures take the same time. */
   private dummyHash: Promise<string>;
+  /** Password hashing is memory-hungry: cap how many run at once (A38). */
+  private readonly hashGate = new HashGate(8, 64);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -65,31 +71,35 @@ export class AuthService {
       : this.env.AUTH_ABSOLUTE_TIMEOUT_HOURS * HOUR;
   }
 
-  /** Check a username and password and open a session. Every failure looks the same. */
+  /**
+   * Check a username (or email) and password and open a session. Every failure looks the same.
+   *
+   * Each attempt is RESERVED in the database before the (slow) password check, in one atomic
+   * update that only succeeds while the account is not locked and has attempts left. So a burst
+   * of parallel guesses gets at most AUTH_MAX_FAILED_LOGINS password checks, never more.
+   */
   async login(
-    usernameInput: string,
+    identifier: string,
     password: string,
     client: ClientKind,
     meta: RequestMeta,
   ): Promise<Authenticated & { token: string }> {
-    const username = usernameInput.trim().toLowerCase();
+    const key = identifier.trim().toLowerCase();
     const now = this.clock.now();
-    const user = await this.prisma.user.findUnique({ where: { username } });
+    const user = await this.prisma.user.findUnique({
+      where: key.includes('@') ? { email: key } : { username: key },
+    });
 
-    if (!user) {
-      await verifyPassword(password, await this.dummyHash);
+    // The same database round trip for unknown users, so timing does not reveal accounts.
+    const reserved = await this.reserveAttempt(user?.id ?? UNKNOWN_USER_ID, now);
+    if (!user || !reserved) {
+      await this.verifyGated(password, await this.dummyHash);
       throw this.signInFailed();
     }
 
-    // While locked, do not even check the password (and do not extend the lock).
-    if (user.lockedUntil && user.lockedUntil > now) {
-      await verifyPassword(password, await this.dummyHash);
-      throw this.signInFailed();
-    }
-
-    const valid = await verifyPassword(password, user.passwordHash);
+    const valid = await this.verifyGated(password, user.passwordHash);
     if (!valid) {
-      await this.recordFailure(user.id, now);
+      await this.afterFailure(user.id, reserved.failedLoginCount, now);
       throw this.signInFailed();
     }
     // Checked after the password, so a leaver's account answers exactly like a wrong password.
@@ -108,6 +118,51 @@ export class AuthService {
       },
     });
     return this.openSession(updated, client, meta);
+  }
+
+  /**
+   * Count one attempt, atomically, if the account may try now. Returns the new count, or null
+   * when the account is locked or already has an attempt in flight for every remaining try.
+   */
+  private async reserveAttempt(
+    userId: string,
+    now: Date,
+  ): Promise<{ failedLoginCount: number } | null> {
+    const rows = await this.prisma.$queryRaw<{ failed_login_count: number }[]>`
+      UPDATE users
+         SET failed_login_count = failed_login_count + 1
+       WHERE id = ${userId}::uuid
+         AND (locked_until IS NULL OR locked_until <= ${now})
+         AND failed_login_count < ${this.env.AUTH_MAX_FAILED_LOGINS}
+      RETURNING failed_login_count`;
+    const row = rows[0];
+    return row ? { failedLoginCount: row.failed_login_count } : null;
+  }
+
+  /** A reserved attempt failed: lock the account when it used the last try. */
+  private async afterFailure(userId: string, count: number, now: Date): Promise<boolean> {
+    if (count < this.env.AUTH_MAX_FAILED_LOGINS) return false;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        failedLoginCount: 0,
+        lockedUntil: new Date(now.getTime() + this.env.AUTH_LOCKOUT_MINUTES * MINUTE),
+      },
+    });
+    return true;
+  }
+
+  /** Password check behind the hash gate; 503 when the server is flooded with sign-ins. */
+  private async verifyGated(password: string, hash: string): Promise<boolean> {
+    const result = await this.hashGate.run(() => verifyPassword(password, hash));
+    if (result === null) {
+      throw apiError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        AUTH_ERROR_CODES.serverBusy,
+        'The server is busy. Please try again in a moment.',
+      );
+    }
+    return result;
   }
 
   /**
@@ -136,23 +191,6 @@ export class AuthService {
       data: { lastLoginAt: this.clock.now() },
     });
     return this.openSession(updated, client, meta);
-  }
-
-  private async recordFailure(userId: string, now: Date): Promise<void> {
-    const { failedLoginCount } = await this.prisma.user.update({
-      where: { id: userId },
-      data: { failedLoginCount: { increment: 1 } },
-      select: { failedLoginCount: true },
-    });
-    if (failedLoginCount >= this.env.AUTH_MAX_FAILED_LOGINS) {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          failedLoginCount: 0,
-          lockedUntil: new Date(now.getTime() + this.env.AUTH_LOCKOUT_MINUTES * MINUTE),
-        },
-      });
-    }
   }
 
   private signInFailed() {
@@ -194,6 +232,16 @@ export class AuthService {
 
     if (user.status !== 'ACTIVE') {
       await this.revokeAllSessions(user.id, 'user_deactivated');
+      throw this.unauthenticated();
+    }
+
+    // A session opened before the last password change is void, even one that raced the change
+    // (signed in with the old password while the change was being saved).
+    if (user.passwordChangedAt && session.createdAt < user.passwordChangedAt) {
+      await this.prisma.session.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: now, revokedReason: 'password_changed' },
+      });
       throw this.unauthenticated();
     }
 
@@ -263,22 +311,42 @@ export class AuthService {
     await this.revokeAllSessions(userId, 'user_deactivated');
   }
 
+  /**
+   * Change your own password. A wrong current password counts towards the same lockout as
+   * sign-in, so a stolen session cannot be used to guess the real password: when the tries run
+   * out the account locks and every session ends. On success every session (including this one)
+   * ends and a NEW session is opened, so the old token is worthless.
+   */
   async changePassword(
     auth: Authenticated,
     currentPassword: string,
     newPassword: string,
-  ): Promise<User> {
+    meta: RequestMeta,
+  ): Promise<Authenticated & { token: string }> {
     const { user, session } = auth;
-    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+    const now = this.clock.now();
+    const reserved = await this.reserveAttempt(user.id, now);
+    if (!reserved) {
+      await this.revokeAllSessions(user.id, 'too_many_attempts');
+      throw this.unauthenticated();
+    }
+    if (!(await this.verifyGated(currentPassword, user.passwordHash))) {
+      if (await this.afterFailure(user.id, reserved.failedLoginCount, now)) {
+        await this.revokeAllSessions(user.id, 'too_many_attempts');
+        throw this.unauthenticated();
+      }
       throw apiError(
         HttpStatus.BAD_REQUEST,
         AUTH_ERROR_CODES.wrongCurrentPassword,
         'Your current password is not right.',
       );
     }
+    // The right current password: the reserved attempt does not count against them.
+    await this.prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0 } });
+
     const problems = checkPassword(newPassword, user);
     const messages = problems.map((p) => PASSWORD_PROBLEM_MESSAGES[p]);
-    if (await verifyPassword(newPassword, user.passwordHash)) {
+    if (await this.verifyGated(newPassword, user.passwordHash)) {
       messages.push('Choose a password different from your current one.');
     }
     if (messages.length > 0) {
@@ -293,13 +361,23 @@ export class AuthService {
       where: { id: user.id },
       data: {
         passwordHash: await hashPassword(newPassword, this.env.PASSWORD_HASH_COST),
-        passwordChangedAt: this.clock.now(),
+        passwordChangedAt: now,
         mustChangePassword: false,
       },
     });
-    // Anyone else signed in as this person (another browser, a lost phone) is signed out.
-    await this.revokeAllSessions(user.id, 'password_changed', session.id);
-    return updated;
+    // Every device signed in as this person (another browser, a lost phone, this one) is signed
+    // out; this device continues on a brand-new session.
+    await this.revokeAllSessions(user.id, 'password_changed');
+    return this.openSession(updated, session.client === 'MOBILE' ? 'mobile' : 'web', meta);
+  }
+
+  /** Sign out the session a token belongs to, if any (signing in over an old session). */
+  async revokeToken(token: unknown, reason: string): Promise<void> {
+    if (!looksLikeSessionToken(token)) return;
+    await this.prisma.session.updateMany({
+      where: { tokenHash: hashSessionToken(token), revokedAt: null },
+      data: { revokedAt: this.clock.now(), revokedReason: reason },
+    });
   }
 
   /** The user's sessions that are still usable, newest first. */

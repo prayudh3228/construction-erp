@@ -14,7 +14,14 @@ export async function createTestApp(
   let builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(ENV)
     // Low hashing cost keeps tests fast; production enforces at least 17.
-    .useValue({ ...loadEnv(), NODE_ENV: 'test', PASSWORD_HASH_COST: 12, ...overrides });
+    .useValue({
+      ...loadEnv(),
+      NODE_ENV: 'test',
+      PASSWORD_HASH_COST: 12,
+      // Every test signs in from 127.0.0.1; per-address throttling has its own test.
+      AUTH_IP_MAX_FAILURES: 10_000,
+      ...overrides,
+    });
   if (options.clock) builder = builder.overrideProvider(CLOCK).useValue(options.clock);
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication({ logger: false });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type Request, type Response } from 'express';
 import { loadEnv } from '../config/env';
+import { AttemptLimiter, HashGate } from './attempt-limiter';
 import { clientHeaderMiddleware } from './client-header.middleware';
 import { hashPassword, needsRehash, verifyPassword } from './password-hasher';
 import { hashSessionToken, looksLikeSessionToken, newSessionToken } from './session-token';
@@ -127,5 +128,51 @@ describe('client header (CSRF) middleware', () => {
     expect(run('POST', 'evil').next).not.toHaveBeenCalled();
     expect(run('POST', 'web').next).toHaveBeenCalled();
     expect(run('POST', 'mobile').next).toHaveBeenCalled();
+  });
+});
+
+describe('AttemptLimiter', () => {
+  it('blocks a source after N failures in the window, and forgets old ones', () => {
+    let now = 0;
+    const limiter = new AttemptLimiter(3, 60_000, { now: () => new Date(now) });
+    for (let i = 0; i < 3; i++) {
+      expect(limiter.isBlocked('1.2.3.4')).toBe(false);
+      limiter.recordFailure('1.2.3.4');
+    }
+    expect(limiter.isBlocked('1.2.3.4')).toBe(true);
+    expect(limiter.isBlocked('5.6.7.8')).toBe(false); // other sources unaffected
+    now = 60_001; // the window slides past all three
+    expect(limiter.isBlocked('1.2.3.4')).toBe(false);
+  });
+});
+
+describe('HashGate', () => {
+  it('runs at most `limit` tasks at once and turns callers away beyond the queue', async () => {
+    const gate = new HashGate(2, 1);
+    let running = 0;
+    let peak = 0;
+    const releases: (() => void)[] = [];
+    const task = () =>
+      new Promise<string>((resolve) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        releases.push(() => {
+          running -= 1;
+          resolve('done');
+        });
+      });
+    const a = gate.run(task);
+    const b = gate.run(task);
+    const c = gate.run(task); // queued
+    const d = await gate.run(task); // queue full
+    expect(d).toBeNull();
+    expect(peak).toBe(2);
+    releases.shift()!();
+    await a;
+    await new Promise((r) => setTimeout(r, 0));
+    releases.shift()!();
+    releases.shift()!();
+    await expect(Promise.all([b, c])).resolves.toEqual(['done', 'done']);
+    expect(peak).toBe(2);
   });
 });

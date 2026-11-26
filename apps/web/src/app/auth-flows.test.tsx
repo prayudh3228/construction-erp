@@ -17,14 +17,15 @@ describe('timeoutState', () => {
   };
 
   it('ok until 2 minutes before the idle end, then warns, then expires', () => {
-    // Last activity at start: idle end = start + 30 min.
-    expect(timeoutState(start + 27 * MIN, start, info)).toEqual({ kind: 'ok', msLeft: 3 * MIN });
-    expect(timeoutState(start + 28 * MIN, start, info)).toEqual({
+    // Last request at start, 30 min idle, minus 1 min because the server records activity at
+    // most once a minute: the browser counts down to start + 29 min.
+    expect(timeoutState(start + 26 * MIN, start, info)).toEqual({ kind: 'ok', msLeft: 3 * MIN });
+    expect(timeoutState(start + 27 * MIN, start, info)).toEqual({
       kind: 'warn-idle',
       msLeft: WARN_BEFORE_MS,
     });
-    expect(timeoutState(start + 29.5 * MIN, start, info).kind).toBe('warn-idle');
-    expect(timeoutState(start + 30 * MIN, start, info)).toEqual({ kind: 'expired', msLeft: 0 });
+    expect(timeoutState(start + 28.5 * MIN, start, info).kind).toBe('warn-idle');
+    expect(timeoutState(start + 29 * MIN, start, info)).toEqual({ kind: 'expired', msLeft: 0 });
   });
 
   it('activity moves the idle end; the 12-hour end never moves', () => {
@@ -142,8 +143,8 @@ describe('session ending mid-use', () => {
 
 describe('session timeout warning', () => {
   it('warns before the idle limit and "Stay signed in" asks the server to extend it', async () => {
-    // The server last saw this session 29 minutes ago: 1 minute left.
-    const lastSeen = Date.now() - 29 * MIN;
+    // The server last saw this session 28 minutes ago: about a minute left on our countdown.
+    const lastSeen = Date.now() - 28 * MIN;
     fakeAuth.current = fakeMe(
       { displayName: 'Asha Rao' },
       { idleExpiresAt: new Date(lastSeen + 30 * MIN).toISOString() },
@@ -157,6 +158,17 @@ describe('session timeout warning', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Stay signed in' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(fakeAuth.me.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  it('"Stay signed in" after the server already ended the session goes to sign-in, not a blank page', async () => {
+    const lastSeen = Date.now() - 28 * MIN;
+    fakeAuth.current = fakeMe({}, { idleExpiresAt: new Date(lastSeen + 30 * MIN).toISOString() });
+    const { user, router } = renderApp('/finance');
+    const dialog = await screen.findByRole('dialog', { name: 'Are you still there?' });
+    fakeAuth.current = null; // the server ended it a moment ago
+    await user.click(within(dialog).getByRole('button', { name: 'Stay signed in' }));
+    await screen.findByRole('heading', { name: 'Sign in' });
+    expect(router.state.location.search).toMatchObject({ reason: 'expired', redirect: '/finance' });
   });
 
   it('when time is up and the server agrees, returns to sign-in', async () => {

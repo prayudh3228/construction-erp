@@ -72,6 +72,8 @@ export const AUTH_ERROR_CODES = {
   wrongCurrentPassword: 'WRONG_CURRENT_PASSWORD',
   clientHeaderMissing: 'CLIENT_HEADER_MISSING',
   demoLoginDisabled: 'DEMO_LOGIN_DISABLED',
+  tooManyAttempts: 'TOO_MANY_ATTEMPTS',
+  serverBusy: 'SERVER_BUSY',
 } as const;
 export type AuthErrorCode = (typeof AUTH_ERROR_CODES)[keyof typeof AUTH_ERROR_CODES];
 
