@@ -12,7 +12,7 @@ Requires Docker.
 docker compose up --build
 ```
 
-- Web app: http://localhost:8080
+- Web app: http://localhost:8080 (demo mode: click **Continue as demo user**; fake data only)
 - API: http://localhost:3000/api (health: `/api/health`, docs: `/api/docs`)
 - Postgres: localhost:5432 (user `erp`, password `erp`, database `erp_dev`; local demo values)
 
