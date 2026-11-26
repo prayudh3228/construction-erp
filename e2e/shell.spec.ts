@@ -48,7 +48,7 @@ test.describe('login', () => {
   test('validates inline and passes an accessibility scan', async ({ page }) => {
     await page.goto('/login');
     await shot(page, 'phase-01-login');
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByText('Enter your username or email.')).toBeVisible();
     await expect(page.getByText('Enter your password.')).toBeVisible();
     await expect(page.getByLabel(/Username or email/)).toBeFocused();
@@ -162,7 +162,8 @@ test.describe('shell', () => {
     await demoSignIn(page, '/hr');
     await page.getByRole('button', { name: /Account menu/ }).click();
     await page.getByRole('menuitem', { name: 'Sign out' }).click();
-    await expect(page).toHaveURL('/login');
+    await expect(page).toHaveURL('/login?reason=signed-out');
+    await expect(page.getByRole('status')).toContainText('You have signed out.');
     await page.goto('/hr');
     await expect(page).toHaveURL(/\/login/);
   });
