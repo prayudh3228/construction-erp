@@ -1,4 +1,4 @@
-# One command starts everything: `docker compose up --build` (or `pnpm up`).
+# One command starts everything: `docker compose up --build` (or `pnpm stack:up`).
 # Web: http://localhost:8080   API: http://localhost:3000/api   API docs: http://localhost:3000/api/docs
 # All credentials here are local demo values, not secrets.
 name: construction-erp
@@ -14,6 +14,9 @@ services:
       - '${DB_PORT:-5432}:5432'
     volumes:
       - db-data:/var/lib/postgresql/data
+      # Creates erp_test for `pnpm test:clean` on first start.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U erp -d erp_dev']
       interval: 3s
@@ -29,6 +32,8 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://erp:erp@db:5432/erp_dev?schema=public
       CORS_ORIGIN: http://localhost:8080,http://localhost:5173
+      APP_VERSION: ${APP_VERSION:-0.0.0-dev}
+    restart: unless-stopped
     ports:
       - '${API_PORT:-3000}:3000'
     depends_on:
@@ -53,6 +58,7 @@ services:
       dockerfile: docker/web.Dockerfile
     ports:
       - '${WEB_PORT:-8080}:80'
+    restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy

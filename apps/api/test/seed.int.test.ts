@@ -53,6 +53,29 @@ describe('seed runner', () => {
     expect(rows).toBe(0);
   });
 
+  it('applies a seed only once when two runners start together', async () => {
+    let runs = 0;
+    const slow: Seed = {
+      name: `${TEST_PREFIX}concurrent`,
+      description: '',
+      run: async () => {
+        runs += 1;
+        await new Promise((r) => setTimeout(r, 200));
+      },
+    };
+    const other = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL ?? '' }),
+    });
+    try {
+      const [a, b] = await Promise.all([runSeeds(prisma, [slow]), runSeeds(other, [slow])]);
+      expect(runs).toBe(1);
+      expect([...a.applied, ...b.applied]).toEqual([`${TEST_PREFIX}concurrent`]);
+      expect([...a.skipped, ...b.skipped]).toEqual([`${TEST_PREFIX}concurrent`]);
+    } finally {
+      await other.$disconnect();
+    }
+  });
+
   it('rejects duplicate seed names', async () => {
     const dup: Seed = { name: `${TEST_PREFIX}dup`, description: '', run: async () => {} };
     await expect(runSeeds(prisma, [dup, dup])).rejects.toThrow(/unique/);

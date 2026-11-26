@@ -3,8 +3,8 @@ import { expect, test } from '@playwright/test';
 test('web app shows the API and database as healthy', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Construction ERP' })).toBeVisible();
-  await expect(page.getByText('Running')).toBeVisible();
-  await expect(page.getByText('Connected')).toBeVisible();
+  await expect(page.getByText('Running', { exact: true })).toBeVisible();
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible();
   // Date is shown as DD-MM-YYYY
   await expect(page.getByText(/^\d{2}-\d{2}-\d{4}$/)).toBeVisible();
 });

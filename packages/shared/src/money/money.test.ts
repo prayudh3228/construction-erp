@@ -185,6 +185,16 @@ describe('formatting', () => {
     expect(formatINR(rupees('1234.50'), { decimals: 0 })).toBe('₹1,235');
   });
 
+  it('rounds negative amounts correctly when dropping paise', () => {
+    // -₹1.50: HALF_UP -> -₹2, FLOOR (toward -infinity) -> -₹2, CEIL -> -₹1
+    expect(formatINR(paise(-150), { decimals: 0 })).toBe('-₹2');
+    expect(formatINR(paise(-150), { decimals: 0, mode: 'FLOOR' })).toBe('-₹2');
+    expect(formatINR(paise(-150), { decimals: 0, mode: 'CEIL' })).toBe('-₹1');
+    // -₹0.40 rounds to zero and must not show a minus sign
+    expect(formatINR(paise(-40), { decimals: 0 })).toBe('₹0');
+    expect(formatINR(paise(-40), { decimals: 0, symbol: false })).toBe('0');
+  });
+
   it('converts to rupee strings and paise strings for transport', () => {
     expect(toRupeeString(rupees('1234.5'))).toBe('1234.50');
     expect(toRupeeString(paise(-7n))).toBe('-0.07');

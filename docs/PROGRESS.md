@@ -19,6 +19,8 @@ A fresh session should be able to resume from this file alone.
 - Mobile: Expo SDK 58 placeholder that type-checks and bundles.
 - Docker Compose (db, api, web via nginx), GitHub Actions CI (checks, integration with Postgres, Compose + Playwright E2E, gitleaks).
 - Docs skeleton and assumptions A1 to A14.
+- Fresh-eyes review found 14 items; fixed: formatINR sign/rounding for negative whole-rupee output, `pnpm up` clash (now `pnpm stack:up`), E2E exact-text matching, `erp_test` created by compose, health check timeout (never hangs), seed advisory lock for concurrent starts, nginx re-resolving the API, restart policies, years before 1900 rejected, turbo caching of the generated Prisma client, APP_VERSION in compose. Kept the Expo `AGENTS.md` (useful notes for future sessions).
+- Tests: 85 shared unit, 4 API unit, 5 web, 13 API integration, 3 E2E. Changed areas run twice, full suite once from a clean database, E2E twice against the Compose stack: all passed.
 
 ## Commands
 
@@ -37,7 +39,8 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 - The Prisma client is generated into `apps/api/src/generated` (git-ignored). `build`, `typecheck` and `dev` run `prisma generate` first.
 - API tests use Vitest with `unplugin-swc` so Nest decorator metadata works. Plain esbuild would break DI.
 - ESLint's `consistent-type-imports` is off in the API, because Nest needs runtime imports of injected classes.
-- `pnpm test:clean` only touches a database whose name ends in `_test`.
+- `pnpm test:clean` only touches a database whose name ends in `_test` (Compose creates `erp_test` on first start; otherwise `createdb erp_test`).
+- Seeding takes a Postgres advisory lock, so several API containers can start at once.
 - Locally, Playwright can reuse an installed Chromium with `PW_CHROMIUM_PATH=/path/to/chrome`.
 - Money crosses the API as paise strings. Use `toPaiseString` and `fromPaiseString`.
 

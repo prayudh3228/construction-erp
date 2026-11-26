@@ -140,12 +140,16 @@ export interface FormatINROptions {
 /** Format as Indian rupees, e.g. ₹12,34,567.89 or -₹1,00,000.00. */
 export function formatINR(amount: Paise, options: FormatINROptions = {}): string {
   const { symbol = true, decimals = 2, mode = DEFAULT_ROUNDING } = options;
+  const currency = symbol ? '₹' : '';
+  if (decimals === 0) {
+    // Round the signed value first so FLOOR/CEIL behave correctly and -0.40 never shows as "-₹0".
+    const rounded = divRound(amount, PAISE_PER_RUPEE, mode);
+    const sign = rounded < 0n ? '-' : '';
+    return `${sign}${currency}${groupIndian((rounded < 0n ? -rounded : rounded).toString())}`;
+  }
   const negative = amount < 0n;
   const magnitude = negative ? -amount : amount;
-  const prefix = `${negative ? '-' : ''}${symbol ? '₹' : ''}`;
-  if (decimals === 0) {
-    return `${prefix}${groupIndian(divRound(magnitude, PAISE_PER_RUPEE, mode).toString())}`;
-  }
+  const prefix = `${negative ? '-' : ''}${currency}`;
   const whole = magnitude / PAISE_PER_RUPEE;
   const fraction = (magnitude % PAISE_PER_RUPEE).toString().padStart(2, '0');
   return `${prefix}${groupIndian(whole.toString())}.${fraction}`;

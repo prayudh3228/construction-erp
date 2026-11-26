@@ -15,6 +15,8 @@ describe('isValidIsoDate()', () => {
     expect(isValidIsoDate('2026-13-01')).toBe(false);
     expect(isValidIsoDate('2026-4-1')).toBe(false);
     expect(isValidIsoDate('01-04-2026')).toBe(false);
+    expect(isValidIsoDate('1899-12-31')).toBe(false);
+    expect(isValidIsoDate('0099-01-01')).toBe(false);
   });
 });
 
@@ -60,5 +62,6 @@ describe('financialYearOf()', () => {
     expect(financialYearOf('2026-03-31').label).toBe('2025-26');
     expect(financialYearOf('2027-01-15').label).toBe('2026-27');
     expect(financialYearOf('1999-06-01').label).toBe('1999-00');
+    expect(() => financialYearOf('0999-01-01')).toThrow(/Invalid date/);
   });
 });

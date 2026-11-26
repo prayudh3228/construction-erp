@@ -19,8 +19,8 @@
     "db:migrate": "pnpm --filter @erp/api db:migrate",
     "db:seed": "pnpm --filter @erp/api db:seed",
     "db:reset": "pnpm --filter @erp/api db:reset",
-    "up": "docker compose up --build",
-    "down": "docker compose down",
+    "stack:up": "docker compose up --build",
+    "stack:down": "docker compose down",
     "test:clean": "bash scripts/test-clean-db.sh"
   },
   "devDependencies": {

@@ -11,7 +11,11 @@ export const INDIA_TIME_ZONE = 'Asia/Kolkata';
 const ISO_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DISPLAY_PATTERN = /^(\d{2})-(\d{2})-(\d{4})$/;
 
+/** Earliest year accepted. Avoids Date.UTC's 0-99 -> 1900s mapping and short year strings. */
+export const MIN_YEAR = 1900;
+
 function isRealDate(year: number, month: number, day: number): boolean {
+  if (year < MIN_YEAR) return false;
   if (month < 1 || month > 12 || day < 1) return false;
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return day <= daysInMonth;

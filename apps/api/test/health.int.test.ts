@@ -65,3 +65,21 @@ describe('GET /api/health (database down)', () => {
     await request(app.getHttpServer()).get('/api/health/ready').expect(503);
   });
 });
+
+describe('GET /api/health (database silently unreachable)', () => {
+  let app: INestApplication;
+  beforeAll(async () => {
+    // 10.255.255.1 is a non-routable address: connections hang instead of being refused.
+    app = await createTestApp({ DATABASE_URL: 'postgresql://erp:erp@10.255.255.1:5432/none' });
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('answers degraded within the health timeout instead of hanging', async () => {
+    const started = Date.now();
+    const res = await request(app.getHttpServer()).get('/api/health').expect(200);
+    expect(res.body).toMatchObject({ status: 'degraded', checks: { database: 'down' } });
+    expect(Date.now() - started).toBeLessThan(6_000);
+  });
+});

@@ -47,4 +47,4 @@ A TypeScript monorepo (pnpm workspaces + Turborepo) with three apps and two pack
 
 ## Seeds
 
-`apps/api/prisma/seed/seeds.ts` lists named seeds. The runner applies each one once, inside a transaction, and records it in `seed_runs`, so seeding is safe to repeat. Change demo data by adding a new seed, not by editing an applied one. The seed command refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`.
+`apps/api/prisma/seed/seeds.ts` lists named seeds. The runner applies each one once, inside a transaction holding a Postgres advisory lock, and records it in `seed_runs`, so seeding is safe to repeat and safe when several API containers start together. Change demo data by adding a new seed, not by editing an applied one. The seed command refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`.

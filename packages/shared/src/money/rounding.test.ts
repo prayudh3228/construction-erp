@@ -8,6 +8,7 @@ const cases: Array<[bigint, Record<RoundingMode, bigint>]> = [
   [35n, { HALF_UP: 4n, HALF_EVEN: 4n, DOWN: 3n, UP: 4n, FLOOR: 3n, CEIL: 4n }], // 3.5
   [26n, { HALF_UP: 3n, HALF_EVEN: 3n, DOWN: 2n, UP: 3n, FLOOR: 2n, CEIL: 3n }], // 2.6
   [-25n, { HALF_UP: -3n, HALF_EVEN: -2n, DOWN: -2n, UP: -3n, FLOOR: -3n, CEIL: -2n }], // -2.5
+  [-35n, { HALF_UP: -4n, HALF_EVEN: -4n, DOWN: -3n, UP: -4n, FLOOR: -4n, CEIL: -3n }], // -3.5
   [-24n, { HALF_UP: -2n, HALF_EVEN: -2n, DOWN: -2n, UP: -3n, FLOOR: -3n, CEIL: -2n }], // -2.4
   [20n, { HALF_UP: 2n, HALF_EVEN: 2n, DOWN: 2n, UP: 2n, FLOOR: 2n, CEIL: 2n }], // exact
   [0n, { HALF_UP: 0n, HALF_EVEN: 0n, DOWN: 0n, UP: 0n, FLOOR: 0n, CEIL: 0n }],
