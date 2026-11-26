@@ -1,88 +1,77 @@
 import { formatDate } from '@erp/shared';
 import { useQuery } from '@tanstack/react-query';
-import { fetchHealth } from './api/health';
-import { branding } from './branding';
+import { RefreshCw } from 'lucide-react';
+import { fetchHealth } from '@/api/health';
+import { useBranding } from '@/app/branding';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-function Badge({ tone, children }: { tone: 'ok' | 'warn' | 'bad'; children: string }) {
-  const tones = {
-    ok: 'bg-emerald-50 text-emerald-700 ring-emerald-600/20',
-    warn: 'bg-amber-50 text-amber-800 ring-amber-600/20',
-    bad: 'bg-red-50 text-red-700 ring-red-600/20',
-  } as const;
-  return (
-    <span
-      className={`rounded-full px-2.5 py-0.5 text-sm font-medium ring-1 ring-inset ${tones[tone]}`}
-    >
-      {children}
-    </span>
-  );
-}
-
-/** Phase 0 page: proves web -> API -> database is wired up. Replaced by the app shell in Phase 1. */
+/** Public system status (web -> API -> database). Linked from the account menu. */
 export function StatusPage() {
+  const branding = useBranding();
   const health = useQuery({ queryKey: ['health'], queryFn: ({ signal }) => fetchHealth(signal) });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center gap-6 p-6">
+    <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-6 p-6">
       <header className="flex items-center gap-3">
-        <img src={branding.logoUrl} alt="" className="h-10 w-10" />
+        <img src={branding.logoUrl} alt="" className="size-10 rounded-md" />
         <div>
           <h1 className="text-xl font-semibold">{branding.productName}</h1>
-          <p className="text-sm text-slate-500">{branding.companyName}</p>
+          <p className="text-sm text-muted-foreground">{branding.companyName}</p>
         </div>
       </header>
 
-      <section
-        aria-labelledby="status-heading"
-        className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
-      >
-        <h2 id="status-heading" className="mb-4 text-base font-medium">
-          System status
-        </h2>
-
-        {health.isPending && (
-          <p role="status" className="text-slate-500">
-            Checking the server…
-          </p>
-        )}
-
-        {health.isError && (
-          <div role="alert" className="space-y-3">
-            <Badge tone="bad">Server unreachable</Badge>
-            <p className="text-sm text-slate-600">
-              The web app could not reach the API. Check that it is running, then try again.
+      <Card aria-labelledby="status-heading">
+        <CardHeader>
+          <CardTitle id="status-heading">System status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {health.isPending && (
+            <p role="status" className="text-muted-foreground">
+              Checking the server…
             </p>
-            <button
-              type="button"
-              onClick={() => void health.refetch()}
-              className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-            >
-              Try again
-            </button>
-          </div>
-        )}
+          )}
 
-        {health.isSuccess && (
-          <dl className="grid grid-cols-2 gap-y-3 text-sm">
-            <dt className="text-slate-500">API</dt>
-            <dd>
-              <Badge tone={health.data.status === 'ok' ? 'ok' : 'warn'}>
-                {health.data.status === 'ok' ? 'Running' : 'Degraded'}
-              </Badge>
-            </dd>
-            <dt className="text-slate-500">Database</dt>
-            <dd>
-              <Badge tone={health.data.checks.database === 'up' ? 'ok' : 'bad'}>
-                {health.data.checks.database === 'up' ? 'Connected' : 'Not connected'}
-              </Badge>
-            </dd>
-            <dt className="text-slate-500">Version</dt>
-            <dd>{health.data.version}</dd>
-            <dt className="text-slate-500">Checked on</dt>
-            <dd>{formatDate(new Date(health.data.time))}</dd>
-          </dl>
-        )}
-      </section>
+          {health.isError && (
+            <div role="alert" className="space-y-3">
+              <Badge tone="danger">Server unreachable</Badge>
+              <p className="text-sm text-muted-foreground">
+                The web app could not reach the API. Check that it is running, then try again.
+              </p>
+              <Button onClick={() => void health.refetch()} loading={health.isFetching}>
+                {!health.isFetching && <RefreshCw aria-hidden />}
+                Try again
+              </Button>
+            </div>
+          )}
+
+          {health.isSuccess && (
+            <dl className="grid grid-cols-2 gap-y-3 text-sm">
+              <dt className="text-muted-foreground">API</dt>
+              <dd>
+                <Badge tone={health.data.status === 'ok' ? 'success' : 'warning'}>
+                  {health.data.status === 'ok' ? 'Running' : 'Degraded'}
+                </Badge>
+              </dd>
+              <dt className="text-muted-foreground">Database</dt>
+              <dd>
+                <Badge tone={health.data.checks.database === 'up' ? 'success' : 'danger'}>
+                  {health.data.checks.database === 'up' ? 'Connected' : 'Not connected'}
+                </Badge>
+              </dd>
+              <dt className="text-muted-foreground">Version</dt>
+              <dd className="tabular">{health.data.version}</dd>
+              <dt className="text-muted-foreground">Checked on</dt>
+              <dd className="tabular">{formatDate(new Date(health.data.time))}</dd>
+            </dl>
+          )}
+        </CardContent>
+      </Card>
+
+      <a href="/" className="text-sm text-primary underline-offset-4 hover:underline">
+        Back to the app
+      </a>
     </main>
   );
 }
