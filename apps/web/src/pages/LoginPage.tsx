@@ -5,6 +5,7 @@ import { Info } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useBranding } from '@/app/branding';
+import { usePageTitle } from '@/app/page-title';
 import { safeRedirectPath } from '@/app/redirect';
 import { startDemoSession } from '@/app/session';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ const route = getRouteApi('/login');
 
 export function LoginPage() {
   const branding = useBranding();
+  usePageTitle('Sign in');
   const navigate = useNavigate();
   const { redirect } = route.useSearch();
   const demo = isDemoMode();

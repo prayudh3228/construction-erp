@@ -73,10 +73,14 @@ test.describe('shell', () => {
     await demoSignIn(page);
     await expect(page).toHaveURL('/dashboard');
     const nav = page.getByRole('navigation', { name: 'Departments' });
-    for (const name of DEPARTMENTS) {
+    for (const [i, name] of DEPARTMENTS.entries()) {
       await nav.getByRole('link', { name }).click();
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
       await expect(nav.getByRole('link', { name })).toHaveAttribute('aria-current', 'page');
+      await expect(page).toHaveTitle(`${name} · Construction ERP`);
+      // Focus moves to the new page's heading, so screen readers announce the page. (The first
+      // link is the page we start on, so clicking it does not navigate.)
+      if (i > 0) await expect(page.getByRole('heading', { level: 1, name })).toBeFocused();
     }
   });
 

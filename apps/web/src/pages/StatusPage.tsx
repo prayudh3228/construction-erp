@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { fetchHealth } from '@/api/health';
 import { useBranding } from '@/app/branding';
+import { usePageTitle } from '@/app/page-title';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 /** Public system status (web -> API -> database). Linked from the account menu. */
 export function StatusPage() {
   const branding = useBranding();
+  usePageTitle('System status');
   const health = useQuery({ queryKey: ['health'], queryFn: ({ signal }) => fetchHealth(signal) });
 
   return (

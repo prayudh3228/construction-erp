@@ -1,6 +1,7 @@
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type FilterFn,
   type PaginationState,
   type Row,
   type SortingState,
@@ -47,10 +48,38 @@ declare module '@tanstack/react-table' {
     filterOptions?: readonly { value: string; label: string }[];
     /** First option of that drop-down, e.g. "All statuses". */
     filterAllLabel?: string;
+    /** Text the search box matches for this cell, when it differs from the raw value
+     * (e.g. a date shown as DD-MM-YYYY, or a status label instead of its code). */
+    searchText?: (row: TData) => string;
   }
 }
 
 export const PAGE_SIZES = [10, 25, 50, 100] as const;
+
+/**
+ * Search matches what the user SEES: a column's `meta.searchText` when given, plus the raw value.
+ * Every word of the search must appear (case-insensitive), so "pune active" narrows the list.
+ */
+export function matchesSearch<TData>(row: Row<TData>, columnId: string, query: unknown): boolean {
+  const words = String(query ?? '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length === 0) return true;
+  const cells = row.getAllCells().filter((c) => c.column.getCanGlobalFilter());
+  // TanStack asks once per column and keeps the row if ANY column says yes. Answer for the whole
+  // row on the first searchable column only, so words may match across different columns.
+  if (cells[0]?.column.id !== columnId) return false;
+  const hay = cells
+    .map((c) => {
+      const raw = c.getValue();
+      const shown = c.column.columnDef.meta?.searchText?.(row.original) ?? '';
+      return `${typeof raw === 'string' || typeof raw === 'number' ? raw : ''} ${shown}`;
+    })
+    .join(' ')
+    .toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
 
 export interface DataTableProps<TData> {
   /** Accessible name of the table, e.g. "Projects". */
@@ -115,7 +144,9 @@ export function DataTable<TData>({
     },
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
-    globalFilterFn: 'includesString',
+    globalFilterFn: matchesSearch as FilterFn<TData>,
+    // Columns join the search when they have a string/number value or say how to show it.
+    getColumnCanGlobalFilter: (column) => column.columnDef.enableGlobalFilter !== false,
     // Every column sorts ascending on the first click (TanStack's default is descending for numbers).
     sortDescFirst: false,
     getCoreRowModel: getCoreRowModel(),
@@ -142,6 +173,10 @@ export function DataTable<TData>({
 
   const filteredCount = table.getFilteredRowModel().rows.length;
   const { pageIndex, pageSize } = table.getState().pagination;
+  // If the data shrinks (refetch, delete) while on a later page, step back to the last page
+  // instead of showing an empty page. Setting own state during render is allowed when guarded.
+  const lastPage = Math.max(0, Math.ceil(filteredCount / pageSize) - 1);
+  if (pageIndex > lastPage) setPagination((p) => ({ ...p, pageIndex: lastPage }));
   const from = filteredCount === 0 ? 0 : pageIndex * pageSize + 1;
   const to = Math.min(filteredCount, (pageIndex + 1) * pageSize);
   const filterColumns = table.getAllLeafColumns().filter((c) => c.columnDef.meta?.filterOptions);

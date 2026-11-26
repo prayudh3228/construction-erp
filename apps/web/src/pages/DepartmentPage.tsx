@@ -13,6 +13,7 @@ import { useParams } from '@tanstack/react-router';
 import { type ColumnDef } from '@tanstack/react-table';
 import { Briefcase, Lock, SearchX } from 'lucide-react';
 import { type ReactNode, useMemo } from 'react';
+import { usePageTitle } from '@/app/page-title';
 import { useSession } from '@/app/session';
 import { DEPARTMENT_ICONS } from '@/app/shell/department-icons';
 import { projectsForDepartment } from '@/app/shell/ProjectSwitcher';
@@ -41,6 +42,9 @@ export function DepartmentPage() {
   const department = useCurrentDepartment();
   const session = useSession();
   const params = useParams({ strict: false }) as { departmentId?: string };
+  usePageTitle(
+    department?.label ?? (params.departmentId === undefined ? 'Start' : 'Page not found'),
+  );
   if (!session) return null;
   if (!department && params.departmentId !== undefined) return <NotFoundPage />;
   if (!department) {
@@ -257,6 +261,7 @@ function ProjectsTable({
         filterFn: 'equalsString',
         meta: {
           filterAllLabel: 'All types',
+          searchText: (p) => PROJECT_TYPE_LABELS[p.type],
           filterOptions: Object.entries(PROJECT_TYPE_LABELS).map(([value, label]) => ({
             value,
             label,
@@ -274,6 +279,7 @@ function ProjectsTable({
         filterFn: 'equalsString',
         meta: {
           filterAllLabel: 'All statuses',
+          searchText: (p) => PROJECT_STATUS_LABELS[p.status],
           filterOptions: Object.entries(PROJECT_STATUS_LABELS).map(([value, label]) => ({
             value,
             label,

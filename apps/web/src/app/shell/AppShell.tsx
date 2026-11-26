@@ -1,7 +1,7 @@
 import { visibleDepartments } from '@erp/shared';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { Menu } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogDescription, DialogTitle, SheetContent } from '@/components/ui/dialog';
@@ -32,6 +32,21 @@ export function AppShell() {
   const [drawerPath, setDrawerPath] = useState<string | null>(null);
   const drawerOpen = drawerPath === pathname;
   const setDrawerOpen = (open: boolean) => setDrawerPath(open ? pathname : null);
+
+  // After moving to another page, put focus on its heading so screen readers announce it and
+  // keyboard users continue from the top of the content. Not on first load, not on ?project=.
+  const firstPath = useRef(pathname);
+  useEffect(() => {
+    if (pathname === firstPath.current) return;
+    firstPath.current = '';
+    // Wait a tick: the old page's heading is still in the DOM when the path first changes.
+    const timer = window.setTimeout(() => {
+      const main = document.getElementById('main');
+      const target = main?.querySelector<HTMLElement>('h1') ?? main;
+      target?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [pathname]);
 
   if (!session) return null; // The route guard redirects; this only covers sign-out mid-render.
   const departments = visibleDepartments(session.access);

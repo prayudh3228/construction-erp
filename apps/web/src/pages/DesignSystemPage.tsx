@@ -1,7 +1,8 @@
-import { type Paise, paise, rupees } from '@erp/shared';
+import { type Paise, formatDate, paise, rupees } from '@erp/shared';
 import { type ColumnDef } from '@tanstack/react-table';
 import { Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { usePageTitle } from '@/app/page-title';
 import { DataTable } from '@/components/data-table/data-table';
 import { IndianDate, Money } from '@/components/format';
 import { PageHeader } from '@/components/page-header';
@@ -48,6 +49,7 @@ const MONEY_SAMPLES: [string, Paise][] = [
 
 /** Living reference for the design system (demo mode only). */
 export function DesignSystemPage() {
+  usePageTitle('Design system');
   const [mode, setMode] = useState<TableMode>('data');
   const [qty, setQty] = useState('');
   const qtyError = qty !== '' && !/^\d+(\.\d{1,3})?$/.test(qty) ? 'Enter a number.' : undefined;
@@ -59,6 +61,7 @@ export function DesignSystemPage() {
       {
         accessorKey: 'date',
         header: 'Date',
+        meta: { searchText: (b) => formatDate(b.date) },
         cell: ({ row }) => <IndianDate value={row.original.date} />,
       },
       {
@@ -80,6 +83,7 @@ export function DesignSystemPage() {
         filterFn: 'equalsString',
         meta: {
           filterAllLabel: 'All statuses',
+          searchText: (b) => BILL_LABEL[b.status],
           filterOptions: Object.entries(BILL_LABEL).map(([value, label]) => ({ value, label })),
         },
         cell: ({ row }) => (

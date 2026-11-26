@@ -71,19 +71,48 @@ describe('DataTable', () => {
     expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
   });
 
-  it('searches across columns and resets to page 1', async () => {
+  it('searches every word, across columns, and resets to page 1', async () => {
     const { user, bodyRows, firstCells } = setup();
     await user.click(screen.getByRole('button', { name: 'Next page' }));
-    await user.type(screen.getByRole('searchbox', { name: 'Search items' }), 'lot 2');
-    // "lot 20".."lot 23"
+    // "cement" matches the name/kind, "2" matches the lot number: cement lots 02, 12, 20, 22.
+    await user.type(screen.getByRole('searchbox', { name: 'Search items' }), 'Cement 2');
     expect(firstCells()).toEqual([
+      'Cement lot 02',
+      'Cement lot 12',
       'Cement lot 20',
-      'Steel lot 21',
       'Cement lot 22',
-      'Steel lot 23',
     ]);
     expect(screen.getByText(/Showing/)).toHaveTextContent('Showing 1–4 of 4 (filtered from 23)');
     expect(bodyRows()).toHaveLength(4);
+  });
+
+  it('searches the text a column shows, not only its raw value', async () => {
+    const kind = columns[1]!;
+    const shownColumns: ColumnDef<Item, unknown>[] = [
+      columns[0]!,
+      { ...kind, meta: { ...kind.meta, searchText: (r: Item) => `Grade ${r.kind.toUpperCase()}` } },
+    ];
+    const { user, firstCells } = setup({ columns: shownColumns });
+    await user.type(screen.getByRole('searchbox'), 'grade steel lot 0');
+    expect(firstCells()).toEqual([
+      'Steel lot 01',
+      'Steel lot 03',
+      'Steel lot 05',
+      'Steel lot 07',
+      'Steel lot 09',
+    ]);
+  });
+
+  it('steps back to the last page when the data shrinks', async () => {
+    const user = userEvent.setup();
+    const props = { label: 'Items', columns, getRowId: (r: Item) => r.id };
+    const { rerender } = render(<DataTable {...props} data={ROWS} />);
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(screen.getByText('Page 3 of 3')).toBeInTheDocument();
+    rerender(<DataTable {...props} data={ROWS.slice(0, 12)} />);
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    expect(screen.getByText(/Showing/)).toHaveTextContent('Showing 11–12 of 12');
   });
 
   it('filters by an exact option value', async () => {

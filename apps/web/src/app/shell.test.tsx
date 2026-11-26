@@ -265,6 +265,83 @@ describe('project switcher', () => {
   });
 });
 
+describe('review fixes', () => {
+  it('a numeric-looking project id is kept exactly and not re-quoted', async () => {
+    signIn();
+    setProjectsSource({
+      list: () =>
+        Promise.resolve([
+          {
+            id: '123',
+            code: '123',
+            name: 'Numeric Site',
+            type: 'contract',
+            status: 'active',
+            city: 'Pune',
+          },
+        ]),
+    });
+    const { user, router } = renderApp('/finance?project=123');
+    await screen.findByRole('heading', { level: 2, name: 'Numeric Site' });
+    await user.click(within(sidebar()).getByRole('link', { name: 'Purchase' }));
+    await screen.findByRole('heading', { level: 1, name: 'Purchase' });
+    expect(currentUrl(router)).toBe('/purchase?project=123');
+  });
+
+  it('"1e3" is not read as project 1000', async () => {
+    signIn();
+    renderApp('/finance?project=1e3');
+    expect(await screen.findByText(/There is no project "1e3"/)).toBeInTheDocument();
+  });
+
+  it('sets the tab title and moves focus to the new page heading', async () => {
+    signIn();
+    const { user } = renderApp('/finance');
+    await screen.findByRole('heading', { level: 1, name: 'Accounts and finance' });
+    expect(document.title).toBe('Accounts and finance · Construction ERP');
+    await user.click(within(sidebar()).getByRole('link', { name: 'Safety' }));
+    const h1 = await screen.findByRole('heading', { level: 1, name: 'Safety' });
+    await waitFor(() => expect(h1).toHaveFocus());
+    expect(document.title).toBe('Safety · Construction ERP');
+  });
+
+  it('the login page has its own title', async () => {
+    renderApp('/login');
+    await screen.findByRole('heading', { name: 'Sign in' });
+    expect(document.title).toBe('Sign in · Construction ERP');
+  });
+
+  it('without demo mode, no fake projects are shown even to a session', async () => {
+    vi.stubEnv('VITE_DEMO_MODE', 'false');
+    signIn();
+    renderApp('/finance');
+    expect(await screen.findByRole('heading', { name: 'No projects yet' })).toBeInTheDocument();
+    expect(screen.queryByText('PRJ-001')).not.toBeInTheDocument();
+    expect(screen.queryByText('Demo data')).not.toBeInTheDocument();
+  });
+
+  it('keeps working when browser storage throws', async () => {
+    const fail = () => {
+      throw new Error('blocked');
+    };
+    const broken = {
+      getItem: fail,
+      setItem: fail,
+      removeItem: fail,
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    };
+    vi.stubGlobal('localStorage', broken);
+    vi.stubGlobal('sessionStorage', broken);
+    const { user } = renderApp('/finance');
+    await user.click(await screen.findByRole('button', { name: 'Continue as demo user' }));
+    await screen.findByRole('heading', { level: 1, name: 'Accounts and finance' });
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+  });
+});
+
 describe('project loading states', () => {
   it('shows a loading state while projects load', async () => {
     signIn();

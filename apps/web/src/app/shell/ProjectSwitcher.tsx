@@ -114,7 +114,7 @@ export function ProjectSwitcher({ department }: { department: Department | undef
             <CommandEmpty>No project matches that search.</CommandEmpty>
             <CommandGroup heading="Views">
               <ScopeItem
-                value="all-projects"
+                value="view:all"
                 keywords={['all', 'projects']}
                 selected={scope.kind === 'all'}
                 onSelect={() => choose(ALL_PROJECTS)}
@@ -123,7 +123,7 @@ export function ProjectSwitcher({ department }: { department: Department | undef
                 All projects
               </ScopeItem>
               <ScopeItem
-                value="company-wide"
+                value="view:company"
                 keywords={['company', 'wide', 'head office']}
                 selected={scope.kind === 'company'}
                 onSelect={() => choose(COMPANY_WIDE)}
@@ -161,7 +161,8 @@ export function ProjectSwitcher({ department }: { department: Department | undef
               {list.map((p) => (
                 <ScopeItem
                   key={p.id}
-                  value={p.id}
+                  // Prefixed so a project id can never collide with a view item.
+                  value={`project:${p.id}`}
                   keywords={[p.code, p.name, p.city, PROJECT_TYPE_LABELS[p.type]]}
                   selected={scope.kind === 'project' && scope.projectId === p.id}
                   onSelect={() => choose({ kind: 'project', projectId: p.id })}

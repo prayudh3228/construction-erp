@@ -16,6 +16,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage';
 import { StatusPage } from '@/pages/StatusPage';
 import { RootLayout } from './RootLayout';
 import { safeRedirectPath } from './redirect';
+import { parseSearch, stringifySearch } from './search-params';
 import { sessionStore } from './session';
 import { AppShell } from './shell/AppShell';
 
@@ -35,10 +36,8 @@ export interface AppSearch {
 
 function validateAppSearch(search: Record<string, unknown>): AppSearch {
   const p = search.project;
-  // The router JSON-parses query values, so "?project=123" arrives as a number.
-  if (typeof p === 'string' && p !== '') return { project: p };
-  if (typeof p === 'number' && Number.isFinite(p)) return { project: String(p) };
-  return {};
+  // Query values arrive as raw strings (see search-params.ts).
+  return typeof p === 'string' && p !== '' ? { project: p } : {};
 }
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -122,6 +121,8 @@ export function createAppRouter(queryClient: QueryClient, history?: RouterHistor
     routeTree,
     context: { queryClient },
     defaultPreload: 'intent',
+    parseSearch,
+    stringifySearch,
     scrollRestoration: true,
     ...(history ? { history } : {}),
   });
