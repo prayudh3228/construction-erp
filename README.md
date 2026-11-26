@@ -27,7 +27,7 @@ pnpm install
 cp apps/api/.env.example apps/api/.env   # edit DATABASE_URL if needed
 pnpm db:migrate && pnpm db:seed
 pnpm dev                                  # API on :3000, web on :5173
-pnpm --filter @erp/mobile start          # Expo dev server for the mobile app
+pnpm --filter @erp/mobile start          # Expo dev server for the mobile app (demo mode on in development)
 ```
 
 ## Checks

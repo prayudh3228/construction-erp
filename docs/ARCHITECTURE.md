@@ -27,7 +27,7 @@ A TypeScript monorepo (pnpm workspaces + Turborepo) with three apps and two pack
 | Validation      | Zod 4 in `packages/shared`                                                                                                                | One schema for API and clients (e.g. `healthResponseSchema`)                                                                                                          |
 | API docs        | `@nestjs/swagger`, served at `/api/docs` outside production                                                                               | OpenAPI spec as the brief requires. `pnpm --filter @erp/api openapi` writes `openapi.json`                                                                            |
 | Web             | React 19, Vite 8, Tailwind 4, TanStack Query, TanStack Router (code-based routes), TanStack Table v8, Radix UI (`radix-ui`), cmdk, sonner | shadcn/ui-style components written by hand on our tokens (A21)                                                                                                        |
-| Mobile          | Expo SDK 58 (React Native 0.88)                                                                                                           | expo-sqlite and the sync queue arrive in Phase 28                                                                                                                     |
+| Mobile          | Expo SDK 58 (React Native 0.88), Expo Router (`src/app`, tabs from `expo-router/js-tabs`), NetInfo, jest-expo + Testing Library v14       | expo-sqlite and the sync queue arrive in Phase 28                                                                                                                     |
 | Tests           | Vitest everywhere (SWC plugin in the API for decorator metadata), Supertest for API integration against real Postgres, Playwright for E2E |                                                                                                                                                                       |
 | Local run       | Docker Compose: `db`, `api` (migrate, seed, start), `web` (nginx serving the build and proxying `/api`)                                   | One command                                                                                                                                                           |
 
@@ -60,6 +60,15 @@ A TypeScript monorepo (pnpm workspaces + Turborepo) with three apps and two pack
 - The **project switcher** value is in the URL (`?project=`), parsed by `parseProjectScope`, so it survives reloads, can be shared, and carries across departments. Ctrl/⌘+K opens it.
 - Projects come through the `ProjectsSource` interface (`apps/web/src/data/projects.ts`): demo fixtures now, the API in Phase 5.
 - Every department page follows one template: All-projects summary + table, one project's view, or the Company-wide section, each with loading, empty and error states.
+
+## Mobile shell (Phase 1b)
+
+- **Routes** (`apps/mobile/src/app`): `login`, and the signed-in `(tabs)` group with Today, Capture, Sync and More. The tabs layout redirects signed-out users to `login`; the login screen redirects signed-in users to Today.
+- **Every screen** uses `<Screen>`: title, the **sync status pill** (tap to open Sync) and the **offline banner** whenever NetInfo reports no connection (Wi-Fi without internet counts as offline).
+- **Sync status** text comes from one function, `describeSync(status, connectivity)` (`src/state/sync.ts`). The status itself is a placeholder until the Phase 28 offline queue drives it.
+- **Theme** (`src/theme.ts`) reads the shared tokens directly: the same colours as the web, 48dp minimum touch targets (56dp for a screen's main action), larger body text.
+- **Projects** come through a `ProjectsSource` interface like the web (`src/data/projects.ts`), with demo data from `@erp/shared/demo`.
+- **Tests:** `renderRouter` from `expo-router/testing-library` renders the real screens in Jest; NetInfo is replaced by a controllable mock (`src/test/netinfo-mock.ts`).
 
 ## Seeds
 
