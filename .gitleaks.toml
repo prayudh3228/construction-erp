@@ -1,0 +1,7 @@
+# Secret scanning rules. Extends gitleaks' defaults.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Local demo credentials (erp/erp) used only for Docker Compose and tests"
+regexes = ['''postgres(ql)?://erp:erp@''']
