@@ -17,6 +17,11 @@ The source of truth is `apps/api/prisma/schema.prisma`. This file explains the i
 | ----------- | ----- | ----------------------------------------------------------- |
 | `seed_runs` | 0     | Names of demo-data seeds already applied, so seeds run once |
 
+## Shared shapes used by the UI before their tables exist (Phase 1)
+
+- `ProjectSummary` (`packages/shared/src/navigation/project-scope.ts`): id, code, name, type (`contract` | `development`), status (`planned` | `active` | `on_hold` | `completed`), city. **Provisional:** the Phase 5 project master extends it.
+- Project ids are URL-safe (letters, digits, `-`, `_`, up to 64 characters) and can never be `all` or `company`, which the project switcher reserves (`projectIdSchema`). Phase 5 keeps UUID primary keys and uses the project **code** or id in URLs; whichever is chosen must pass this schema.
+
 ## Planned shape (from the assumptions; see ASSUMPTIONS.md)
 
 - **Company / entity:** one legal entity now. Tables that need it will reference a `company` row, so a second GSTIN or JV can be added later without reshaping data.
