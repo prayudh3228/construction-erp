@@ -7,3 +7,4 @@ apps/api/prisma/migrations/**/*.sql
 playwright-report
 test-results
 apps/web/src/styles/theme.generated.css
+dist-web
