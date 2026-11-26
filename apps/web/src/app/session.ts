@@ -1,6 +1,6 @@
 import { type DepartmentAccess } from '@erp/shared';
 import { useSyncExternalStore } from 'react';
-import { DEMO_USER } from '@/demo/fixtures';
+import { DEMO_USER } from '@erp/shared/demo';
 import { readStorage, writeStorage } from '@/lib/storage';
 
 /**

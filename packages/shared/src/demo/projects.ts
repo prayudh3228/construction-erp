@@ -1,4 +1,4 @@
-import { type ProjectSummary } from '@erp/shared';
+import { type ProjectSummary } from '../navigation/project-scope.js';
 
 /**
  * FAKE demo data. Every name here is invented; none refers to a real project, client or person.
@@ -53,11 +53,3 @@ export const DEMO_PROJECTS: readonly ProjectSummary[] = [
     city: 'Kolhapur',
   },
 ];
-
-export interface DemoUser {
-  name: string;
-  roleLabel: string;
-}
-
-/** The one-click demo user. Sees every department (Director-like) until Phase 3 adds roles. */
-export const DEMO_USER: DemoUser = { name: 'Demo Director', roleLabel: 'Director (demo)' };

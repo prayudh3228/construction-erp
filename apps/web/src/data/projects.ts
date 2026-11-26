@@ -1,6 +1,6 @@
 import { type ProjectSummary, projectSummarySchema } from '@erp/shared';
 import { useQuery } from '@tanstack/react-query';
-import { DEMO_PROJECTS } from '@/demo/fixtures';
+import { DEMO_PROJECTS } from '@erp/shared/demo';
 import { isDemoMode } from '@/lib/env';
 
 /**
