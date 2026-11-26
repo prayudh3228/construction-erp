@@ -1,4 +1,5 @@
 import { type PrismaClient } from '../../src/generated/prisma/client';
+import { demoUsersSeed } from './demo-users';
 
 /**
  * A seed adds FAKE demo data only. Never put real names, PANs, GSTINs or bank details here.
@@ -21,4 +22,5 @@ export const seeds: Seed[] = [
       // Nothing to insert yet: Phase 0 has no business tables.
     },
   },
+  demoUsersSeed(),
 ];

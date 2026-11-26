@@ -1,0 +1,131 @@
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  type DeviceSession,
+  type LoginResponse,
+  type MeResponse,
+  SESSION_COOKIE,
+  changePasswordRequestSchema,
+  loginRequestSchema,
+} from '@erp/shared';
+import { type Request, type Response } from 'express';
+import { z } from 'zod';
+import { parseBody } from '../common/api-error';
+import { ENV } from '../config/config.module';
+import { type Env, cookieSecure } from '../config/env';
+import { type Authenticated, AuthService, type RequestMeta } from './auth.service';
+import { clientKind } from './client-header.middleware';
+import { AllowWhilePasswordChangeRequired, CurrentAuth, Public } from './decorators';
+
+const demoLoginSchema = z.object({ username: z.string().trim().min(1).max(120) });
+
+@ApiTags('auth')
+@Controller('auth')
+export class AuthController {
+  constructor(
+    private readonly auth: AuthService,
+    @Inject(ENV) private readonly env: Env,
+  ) {}
+
+  @Public()
+  @Post('login')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Sign in with username and password',
+    description:
+      'Web clients (x-erp-client: web) get an httpOnly session cookie. Mobile clients (x-erp-client: mobile) get the token in the body and send it as a Bearer token.',
+  })
+  async login(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginResponse> {
+    const { username, password } = parseBody(loginRequestSchema, body);
+    const client = clientKind(req) ?? 'web';
+    const result = await this.auth.login(username, password, client, meta(req));
+    return this.respondWithSession(result, client, res);
+  }
+
+  @Public()
+  @Post('demo-login')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Demo only: sign in as a seeded demo account (AUTH_DEMO_LOGIN=true)' })
+  async demoLogin(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginResponse> {
+    const { username } = parseBody(demoLoginSchema, body);
+    const client = clientKind(req) ?? 'web';
+    const result = await this.auth.demoLogin(username, client, meta(req));
+    return this.respondWithSession(result, client, res);
+  }
+
+  @Post('logout')
+  @HttpCode(204)
+  @AllowWhilePasswordChangeRequired()
+  @ApiOperation({ summary: 'Sign out this device' })
+  async logout(
+    @CurrentAuth() auth: Authenticated,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.auth.logout(auth.session.id);
+    res.clearCookie(SESSION_COOKIE, this.cookieOptions());
+  }
+
+  @Get('me')
+  @AllowWhilePasswordChangeRequired()
+  @ApiOperation({ summary: 'The signed-in user and when the session ends' })
+  me(@CurrentAuth() auth: Authenticated): MeResponse {
+    return { user: this.auth.toAuthUser(auth.user), session: this.auth.sessionInfo(auth.session) };
+  }
+
+  @Get('sessions')
+  @ApiOperation({ summary: 'Your signed-in devices' })
+  sessions(@CurrentAuth() auth: Authenticated): Promise<DeviceSession[]> {
+    return this.auth.activeSessions(auth);
+  }
+
+  @Post('change-password')
+  @HttpCode(200)
+  @AllowWhilePasswordChangeRequired()
+  @ApiOperation({ summary: 'Change your password; signs out your other devices' })
+  async changePassword(
+    @CurrentAuth() auth: Authenticated,
+    @Body() body: unknown,
+  ): Promise<MeResponse> {
+    const { currentPassword, newPassword } = parseBody(changePasswordRequestSchema, body);
+    const user = await this.auth.changePassword(auth, currentPassword, newPassword);
+    return { user: this.auth.toAuthUser(user), session: this.auth.sessionInfo(auth.session) };
+  }
+
+  private respondWithSession(
+    result: Authenticated & { token: string },
+    client: 'web' | 'mobile',
+    res: Response,
+  ): LoginResponse {
+    const body: LoginResponse = {
+      user: this.auth.toAuthUser(result.user),
+      session: this.auth.sessionInfo(result.session),
+    };
+    if (client === 'mobile') return { ...body, token: result.token };
+    res.cookie(SESSION_COOKIE, result.token, {
+      ...this.cookieOptions(),
+      maxAge: this.auth.absoluteTimeoutMs('WEB'),
+    });
+    return body;
+  }
+
+  private cookieOptions() {
+    return {
+      httpOnly: true,
+      secure: cookieSecure(this.env),
+      sameSite: 'lax' as const,
+      path: '/api',
+    };
+  }
+}
+
+function meta(req: Request): RequestMeta {
+  return { userAgent: req.headers['user-agent'], ipAddress: req.ip };
+}

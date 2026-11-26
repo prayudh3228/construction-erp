@@ -20,3 +20,63 @@ model SeedRun {
 
   @@map("seed_runs")
 }
+
+/// Whether a user can sign in. Leavers are DEACTIVATED (never deleted, for the audit trail).
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+
+  @@map("user_status")
+}
+
+/// A person who can sign in. Usernames and emails are stored lower-case.
+model User {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username           String     @unique
+  email              String?    @unique
+  displayName        String     @map("display_name")
+  /// scrypt hash with its parameters ("scrypt$..."); never the password itself.
+  passwordHash       String     @map("password_hash")
+  /// PROVISIONAL (Phase 2): one role key. Phase 3 replaces it with roles and permissions.
+  roleKey            String     @map("role_key")
+  status             UserStatus @default(ACTIVE)
+  mustChangePassword Boolean    @default(false) @map("must_change_password")
+  passwordChangedAt  DateTime?  @map("password_changed_at") @db.Timestamptz(3)
+  failedLoginCount   Int        @default(0) @map("failed_login_count")
+  lockedUntil        DateTime?  @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  deactivatedAt      DateTime?  @map("deactivated_at") @db.Timestamptz(3)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions           Session[]
+
+  @@map("users")
+}
+
+enum SessionClient {
+  WEB
+  MOBILE
+
+  @@map("session_client")
+}
+
+/// A signed-in device. The token itself is never stored, only its SHA-256 hash.
+model Session {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash     String        @unique @map("token_hash")
+  userId        String        @map("user_id") @db.Uuid
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client        SessionClient
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt    DateTime      @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  /// Hard end of the session, however active it is.
+  expiresAt     DateTime      @map("expires_at") @db.Timestamptz(3)
+  revokedAt     DateTime?     @map("revoked_at") @db.Timestamptz(3)
+  revokedReason String?       @map("revoked_reason")
+  userAgent     String?       @map("user_agent")
+  ipAddress     String?       @map("ip_address")
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("sessions")
+}

@@ -33,6 +33,10 @@ services:
       DATABASE_URL: postgresql://erp:erp@db:5432/erp_dev?schema=public
       CORS_ORIGIN: http://localhost:8080,http://localhost:5173
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
+      # Local demo stack: demo sign-in on, fake demo users' password, behind nginx.
+      AUTH_DEMO_LOGIN: 'true'
+      DEMO_USER_PASSWORD: local-demo-only-2026
+      TRUST_PROXY: 'true'
     restart: unless-stopped
     ports:
       - '${API_PORT:-3000}:3000'
