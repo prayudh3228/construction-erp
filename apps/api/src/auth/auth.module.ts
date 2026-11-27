@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
+import { MfaService } from './mfa.service';
 import { AttemptLimiter } from './attempt-limiter';
 import { CLOCK, type Clock, systemClock } from './clock';
 import { ENV } from '../config/config.module';
@@ -12,6 +13,7 @@ import { type Env } from '../config/env';
   controllers: [AuthController],
   providers: [
     AuthService,
+    MfaService,
     { provide: CLOCK, useValue: systemClock },
     {
       provide: AttemptLimiter,

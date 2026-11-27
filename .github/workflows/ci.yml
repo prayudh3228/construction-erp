@@ -49,6 +49,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://erp:erp@localhost:5432/erp_test?schema=public
       DEMO_USER_PASSWORD: local-demo-only-2026
+      AUTH_ENCRYPTION_KEY: MIBS9Ln91jpbLoWadi1S/81K/i8T+NFmcT3wZmRaQg4=
+      DEMO_TOTP_SECRET: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
       # Lower hashing cost keeps the test run fast; production enforces at least 17.
       PASSWORD_HASH_COST: '12'
     steps:

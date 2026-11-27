@@ -8,6 +8,7 @@ import {
   type SessionInfo,
   checkPassword,
   roleKeySchema,
+  roleRequiresMfa,
 } from '@erp/shared';
 import { isDemoUsername } from '@erp/shared/demo';
 import { apiError } from '../common/api-error';
@@ -33,6 +34,8 @@ export interface Authenticated {
 /** Same words for every sign-in failure, so the API never reveals which accounts exist. */
 const SIGN_IN_FAILED =
   'Sign-in failed. Check your username and password. After several failed attempts the account is locked for a while.';
+
+const STAGE_NAMES = { FULL: 'full', MFA_VERIFY: 'mfa_verify', MFA_SETUP: 'mfa_setup' } as const;
 
 /** A UUID no user has: the attempt query for an unknown username touches no row. */
 const UNKNOWN_USER_ID = '00000000-0000-0000-0000-000000000000';
@@ -117,17 +120,25 @@ export class AuthService {
         ...(passwordHash ? { passwordHash } : {}),
       },
     });
-    return this.openSession(updated, client, meta);
+    return this.openSession(updated, client, meta, this.stageAfterPassword(updated));
+  }
+
+  /**
+   * After the right password: users with two-factor on must enter a code; users whose role
+   * requires it but who have not set it up must set it up; everyone else is signed in.
+   */
+  stageAfterPassword(user: User): Session['stage'] {
+    if (user.totpEnabledAt) return 'MFA_VERIFY';
+    if (roleRequiresMfa(roleKeySchema.parse(user.roleKey))) return 'MFA_SETUP';
+    return 'FULL';
   }
 
   /**
    * Count one attempt, atomically, if the account may try now. Returns the new count, or null
    * when the account is locked or already has an attempt in flight for every remaining try.
    */
-  private async reserveAttempt(
-    userId: string,
-    now: Date,
-  ): Promise<{ failedLoginCount: number } | null> {
+  /** Internal to the auth module (also used by MfaService). */
+  async reserveAttempt(userId: string, now: Date): Promise<{ failedLoginCount: number } | null> {
     const rows = await this.prisma.$queryRaw<{ failed_login_count: number }[]>`
       UPDATE users
          SET failed_login_count = failed_login_count + 1
@@ -140,7 +151,7 @@ export class AuthService {
   }
 
   /** A reserved attempt failed: lock the account when it used the last try. */
-  private async afterFailure(userId: string, count: number, now: Date): Promise<boolean> {
+  async afterFailure(userId: string, count: number, now: Date): Promise<boolean> {
     if (count < this.env.AUTH_MAX_FAILED_LOGINS) return false;
     await this.prisma.user.update({
       where: { id: userId },
@@ -153,7 +164,7 @@ export class AuthService {
   }
 
   /** Password check behind the hash gate; 503 when the server is flooded with sign-ins. */
-  private async verifyGated(password: string, hash: string): Promise<boolean> {
+  async verifyGated(password: string, hash: string): Promise<boolean> {
     const result = await this.hashGate.run(() => verifyPassword(password, hash));
     if (result === null) {
       throw apiError(
@@ -167,7 +178,8 @@ export class AuthService {
 
   /**
    * One-click sign-in for seeded demo accounts. Only when AUTH_DEMO_LOGIN=true, which the config
-   * refuses in production; only for the fixed demo usernames; only for active accounts.
+   * refuses in production; only for the fixed demo usernames; only for active accounts. It skips
+   * two-factor on purpose, so the demo can be reviewed without an authenticator app (A41).
    */
   async demoLogin(
     usernameInput: string,
@@ -193,22 +205,36 @@ export class AuthService {
     return this.openSession(updated, client, meta);
   }
 
-  private signInFailed() {
+  signInFailed() {
     return apiError(HttpStatus.UNAUTHORIZED, AUTH_ERROR_CODES.invalidCredentials, SIGN_IN_FAILED);
   }
 
-  private async openSession(user: User, kind: ClientKind, meta: RequestMeta) {
+  /**
+   * Open a session. A half-signed-in one (two-factor still to do) ends after
+   * AUTH_MFA_PENDING_MINUTES whatever happens; a full one follows the normal timeouts.
+   */
+  async openSession(
+    user: User,
+    kind: ClientKind,
+    meta: RequestMeta,
+    stage: Session['stage'] = 'FULL',
+  ) {
     const token = newSessionToken();
     const client = kind === 'mobile' ? 'MOBILE' : 'WEB';
     const now = this.clock.now();
+    const lifetime =
+      stage === 'FULL'
+        ? this.absoluteTimeoutMs(client)
+        : this.env.AUTH_MFA_PENDING_MINUTES * MINUTE;
     const session = await this.prisma.session.create({
       data: {
         tokenHash: hashSessionToken(token),
         userId: user.id,
         client,
+        stage,
         createdAt: now,
         lastSeenAt: now,
-        expiresAt: new Date(now.getTime() + this.absoluteTimeoutMs(client)),
+        expiresAt: new Date(now.getTime() + lifetime),
         userAgent: meta.userAgent?.slice(0, 400) ?? null,
         ipAddress: meta.ipAddress?.slice(0, 64) ?? null,
       },
@@ -271,7 +297,7 @@ export class AuthService {
     return { user, session };
   }
 
-  private unauthenticated() {
+  unauthenticated() {
     return apiError(HttpStatus.UNAUTHORIZED, AUTH_ERROR_CODES.unauthenticated, 'Please sign in.');
   }
 
@@ -407,12 +433,17 @@ export class AuthService {
       email: user.email,
       role: roleKeySchema.parse(user.roleKey),
       mustChangePassword: user.mustChangePassword,
+      mfa: {
+        enabled: user.totpEnabledAt !== null,
+        required: roleRequiresMfa(roleKeySchema.parse(user.roleKey)),
+      },
     };
   }
 
   sessionInfo(session: Session): SessionInfo {
     const idleMs = this.idleTimeoutMs(session.client);
     return {
+      stage: STAGE_NAMES[session.stage],
       idleExpiresAt: new Date(session.lastSeenAt.getTime() + idleMs).toISOString(),
       absoluteExpiresAt: session.expiresAt.toISOString(),
       idleTimeoutSeconds: Math.round(idleMs / 1000),

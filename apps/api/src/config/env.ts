@@ -3,6 +3,9 @@ import { z } from 'zod';
 /** "true"/"false" (also 1/0) from the environment, as a boolean. */
 const booleanFlag = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
 
+/** The published demo key (.env.example, Docker Compose, CI). Refused in production. */
+export const DEMO_ENCRYPTION_KEY = 'MIBS9Ln91jpbLoWadi1S/81K/i8T+NFmcT3wZmRaQg4=';
+
 /** Environment variables the API needs. Validated once at startup; the app refuses to boot if wrong. */
 export const envSchema = z
   .object({
@@ -59,6 +62,15 @@ export const envSchema = z
     PASSWORD_HASH_COST: z.coerce.number().int().min(10).max(20).default(17),
     /** Behind a reverse proxy (nginx in Docker): trust X-Forwarded-For for the client address. */
     TRUST_PROXY: booleanFlag.default(false),
+    /**
+     * 32 random bytes, base64. Encrypts authenticator secrets and keys the recovery-code hashes.
+     * Losing it means everyone must set up two-factor again; leaking it weakens two-factor.
+     */
+    AUTH_ENCRYPTION_KEY: z.string().refine((v) => Buffer.from(v, 'base64').length === 32, {
+      message: 'AUTH_ENCRYPTION_KEY must be 32 random bytes, base64-encoded',
+    }),
+    /** A half-signed-in session (password accepted, two-factor pending) lasts this long. */
+    AUTH_MFA_PENDING_MINUTES: z.coerce.number().int().min(2).max(60).default(10),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.AUTH_DEMO_LOGIN) {
@@ -66,6 +78,13 @@ export const envSchema = z
         code: 'custom',
         path: ['AUTH_DEMO_LOGIN'],
         message: 'Demo sign-in must never be enabled in production',
+      });
+    }
+    if (env.NODE_ENV === 'production' && env.AUTH_ENCRYPTION_KEY === DEMO_ENCRYPTION_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTH_ENCRYPTION_KEY'],
+        message: 'The demo key from .env.example must never be used in production',
       });
     }
     if (env.NODE_ENV === 'production' && env.PASSWORD_HASH_COST < 17) {

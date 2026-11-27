@@ -46,9 +46,16 @@ model User {
   lockedUntil        DateTime?  @map("locked_until") @db.Timestamptz(3)
   lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(3)
   deactivatedAt      DateTime?  @map("deactivated_at") @db.Timestamptz(3)
+  /// Authenticator-app secret, encrypted (AES-256-GCM, "v1:..."); null until set up.
+  totpSecret         String?    @map("totp_secret")
+  /// When two-factor sign-in was switched on; null while it is off or still being set up.
+  totpEnabledAt      DateTime?  @map("totp_enabled_at") @db.Timestamptz(3)
+  /// Last 30-second step whose code was accepted, so a code can never be used twice.
+  totpLastStep       Int?       @map("totp_last_step")
   createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
   sessions           Session[]
+  recoveryCodes      RecoveryCode[]
 
   @@map("users")
 }
@@ -67,6 +74,8 @@ model Session {
   userId        String        @map("user_id") @db.Uuid
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   client        SessionClient
+  /// FULL, or a short-lived half-signed-in session that may only finish two-factor sign-in.
+  stage         SessionStage  @default(FULL)
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   lastSeenAt    DateTime      @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   /// Hard end of the session, however active it is.
@@ -79,4 +88,25 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+enum SessionStage {
+  FULL
+  MFA_VERIFY
+  MFA_SETUP
+
+  @@map("session_stage")
+}
+
+/// One-time codes for signing in when the authenticator phone is lost. Only a keyed hash is kept.
+model RecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([userId, codeHash])
+  @@map("recovery_codes")
 }

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { loadEnv } from './env';
 
-const valid = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db' };
+const valid = {
+  DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
+  AUTH_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+};
 
 describe('loadEnv()', () => {
   it('applies defaults', () => {

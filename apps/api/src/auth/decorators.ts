@@ -13,6 +13,13 @@ export const Public = () => SetMetadata(IS_PUBLIC, true);
 export const ALLOW_PASSWORD_CHANGE = 'auth:allowPasswordChange';
 export const AllowWhilePasswordChangeRequired = () => SetMetadata(ALLOW_PASSWORD_CHANGE, true);
 
+/**
+ * Routes a half-signed-in session (password accepted, two-factor still to do) may use:
+ * who am I, sign out, and the two-factor steps themselves. Everything else answers 403.
+ */
+export const ALLOW_DURING_MFA = 'auth:allowDuringMfa';
+export const AllowDuringMfa = () => SetMetadata(ALLOW_DURING_MFA, true);
+
 export type AuthedRequest = Request & { auth?: Authenticated };
 
 /** The signed-in user and session, set by AuthGuard. */

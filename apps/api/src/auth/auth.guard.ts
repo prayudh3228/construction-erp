@@ -3,7 +3,12 @@ import { Reflector } from '@nestjs/core';
 import { AUTH_ERROR_CODES, SESSION_COOKIE } from '@erp/shared';
 import { apiError } from '../common/api-error';
 import { AuthService } from './auth.service';
-import { ALLOW_PASSWORD_CHANGE, type AuthedRequest, IS_PUBLIC } from './decorators';
+import {
+  ALLOW_DURING_MFA,
+  ALLOW_PASSWORD_CHANGE,
+  type AuthedRequest,
+  IS_PUBLIC,
+} from './decorators';
 
 /** Bearer token (phone) wins over the cookie (browser). */
 export function tokenFromRequest(req: AuthedRequest): unknown {
@@ -31,6 +36,16 @@ export class AuthGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<AuthedRequest>();
     const authenticated = await this.auth.authenticate(tokenFromRequest(req));
     req.auth = authenticated;
+
+    // Half signed in: only the two-factor steps until they are done.
+    if (authenticated.session.stage !== 'FULL') {
+      if (this.reflector.getAllAndOverride<boolean>(ALLOW_DURING_MFA, targets)) return true;
+      throw apiError(
+        HttpStatus.FORBIDDEN,
+        AUTH_ERROR_CODES.mfaRequired,
+        'Finish two-factor sign-in first.',
+      );
+    }
 
     if (
       authenticated.user.mustChangePassword &&

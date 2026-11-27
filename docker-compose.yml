@@ -37,6 +37,8 @@ services:
       # Local demo stack: demo sign-in on, fake demo users' password, behind nginx.
       AUTH_DEMO_LOGIN: 'true'
       DEMO_USER_PASSWORD: local-demo-only-2026
+      AUTH_ENCRYPTION_KEY: MIBS9Ln91jpbLoWadi1S/81K/i8T+NFmcT3wZmRaQg4=
+      DEMO_TOTP_SECRET: JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP
       TRUST_PROXY: 'true'
     restart: unless-stopped
     # Not published on the host: the API is reached through the web server at

@@ -266,6 +266,7 @@ describe('sessions and timeouts', () => {
     const res = await login(user.username).expect(200);
     const start = clock.now().getTime();
     expect(res.body.session).toEqual({
+      stage: 'full',
       idleExpiresAt: new Date(start + 30 * MINUTE).toISOString(),
       absoluteExpiresAt: new Date(start + 12 * HOUR).toISOString(),
       idleTimeoutSeconds: 30 * 60,

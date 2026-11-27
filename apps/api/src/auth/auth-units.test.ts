@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type Request, type Response } from 'express';
-import { loadEnv } from '../config/env';
+import { DEMO_ENCRYPTION_KEY, loadEnv } from '../config/env';
 import { AttemptLimiter, HashGate } from './attempt-limiter';
 import { clientHeaderMiddleware } from './client-header.middleware';
 import { hashPassword, needsRehash, verifyPassword } from './password-hasher';
@@ -72,7 +72,10 @@ describe('session tokens', () => {
 });
 
 describe('auth environment', () => {
-  const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db' };
+  const base = {
+    DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
+    AUTH_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+  };
 
   it('has safe defaults: 30 min idle, 12 h max, 5 tries then 15 min lock, demo off', () => {
     const env = loadEnv({ ...base });
@@ -94,6 +97,9 @@ describe('auth environment', () => {
       /at least 17/,
     );
     expect(() => loadEnv({ ...base, NODE_ENV: 'production' })).not.toThrow();
+    expect(() =>
+      loadEnv({ ...base, NODE_ENV: 'production', AUTH_ENCRYPTION_KEY: DEMO_ENCRYPTION_KEY }),
+    ).toThrow(/demo key/);
   });
 
   it('reads boolean flags strictly', () => {
