@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { setProjectsSource } from '@/data/projects';
 import { axeViolations } from '@/test/axe';
 import { currentUrl, renderApp, signIn } from '@/test/render-app';
-import { sessionStore } from './session';
+import { ApiRequestError } from '@/api/client';
+import { FAKE_PASSWORD, fakeAuth } from '@/test/fake-auth';
 
 const sidebar = () => screen.getAllByRole('navigation', { name: 'Departments' })[0]!;
 const switcher = () => screen.getByRole('button', { name: /^Project: / });
@@ -36,14 +37,60 @@ describe('sign-in guard and login page', () => {
     expect(screen.queryByText('Enter your username or email.')).not.toBeInTheDocument();
   });
 
-  it('does not accept a password yet (real sign-in is Phase 2), and says so', async () => {
+  it('a wrong password shows the server’s message and clears the password field', async () => {
     const { user, router } = renderApp('/login');
     await user.type(await screen.findByLabelText(/Username or email/), 'asha');
-    await user.type(screen.getByLabelText(/Password/), 'secret');
+    await user.type(screen.getByLabelText(/Password/), 'not the password');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(await screen.findByRole('status')).toHaveTextContent(/next phase/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Sign-in failed/);
+    expect(screen.getByLabelText(/Password/)).toHaveValue('');
+    expect(screen.getByLabelText(/Username or email/)).toHaveValue('asha');
     expect(router.state.location.pathname).toBe('/login');
-    expect(sessionStore.get()).toBeNull();
+    expect(fakeAuth.login).toHaveBeenCalledWith('asha', 'not the password');
+  });
+
+  it('the right password signs in and goes where the user was heading', async () => {
+    const { user, router } = renderApp('/purchase?project=PRJ-003');
+    await user.type(await screen.findByLabelText(/Username or email/), 'asha');
+    await user.type(screen.getByLabelText(/Password/), FAKE_PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByRole('heading', { level: 1, name: 'Purchase' });
+    expect(currentUrl(router)).toBe('/purchase?project=PRJ-003');
+    expect(screen.getByRole('button', { name: 'Account menu for Asha Rao' })).toBeInTheDocument();
+  });
+
+  it('a network failure during sign-in is explained, not swallowed', async () => {
+    fakeAuth.login.mockRejectedValueOnce(
+      new ApiRequestError(
+        0,
+        'NETWORK_ERROR',
+        'Could not reach the server. Check your connection and try again.',
+      ),
+    );
+    const { user } = renderApp('/login');
+    await user.type(await screen.findByLabelText(/Username or email/), 'asha');
+    await user.type(screen.getByLabelText(/Password/), FAKE_PASSWORD);
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Could not reach the server/);
+  });
+
+  it('other demo accounts can be chosen from the list', async () => {
+    const { user } = renderApp('/login');
+    await user.selectOptions(
+      await screen.findByRole('combobox', { name: 'Other demo account' }),
+      'demo.finance',
+    );
+    await user.click(screen.getByRole('button', { name: /as the selected demo account/ }));
+    await screen.findByRole('heading', { level: 1, name: 'Management dashboard' });
+    expect(fakeAuth.demoLogin).toHaveBeenCalledWith('demo.finance');
+    expect(
+      screen.getByRole('button', { name: 'Account menu for Demo Finance' }),
+    ).toBeInTheDocument();
+  });
+
+  it('says why when the session ended on its own', async () => {
+    renderApp('/login?reason=expired');
+    expect(await screen.findByRole('status')).toHaveTextContent(/session ended/);
   });
 
   it('demo sign-in returns the user to the page they asked for', async () => {
@@ -355,6 +402,8 @@ describe('project loading states', () => {
     const list = vi
       .fn<() => Promise<ProjectSummary[]>>()
       .mockRejectedValueOnce(new Error('network'))
+      // The app retries a failed request once by itself, so fail twice to reach the error.
+      .mockRejectedValueOnce(new Error('network'))
       .mockResolvedValue([
         {
           id: 'PRJ-010',
@@ -396,14 +445,22 @@ describe('pages and account menu', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
     await screen.findByRole('heading', { name: 'Sign in' });
     expect(router.state.location.pathname).toBe('/login');
-    expect(sessionStore.get()).toBeNull();
-    expect(window.sessionStorage.getItem('erp.demoSession')).toBeNull();
+    expect(fakeAuth.logout).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('You have signed out.');
+    // Back button or typed URL: still signed out.
+    await router.navigate({ to: '/$departmentId', params: { departmentId: 'finance' } });
+    await screen.findByRole('heading', { name: 'Sign in' });
   });
 
-  it('a corrupt stored session counts as signed out', async () => {
-    window.sessionStorage.setItem('erp.demoSession', '{not json');
-    renderApp('/finance');
-    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+  it('signs out locally even if the server cannot be reached', async () => {
+    signIn(undefined, 'Asha Rao');
+    fakeAuth.logout.mockRejectedValueOnce(new Error('offline'));
+    const { user, router } = renderApp('/finance');
+    await screen.findByRole('heading', { level: 1, name: 'Accounts and finance' });
+    await user.click(screen.getByRole('button', { name: 'Account menu for Asha Rao' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
+    await screen.findByRole('heading', { name: 'Sign in' });
+    expect(router.state.location.pathname).toBe('/login');
   });
 
   it('the design-system page is reachable in demo mode', async () => {

@@ -1,5 +1,6 @@
 # One command starts everything: `docker compose up --build` (or `pnpm stack:up`).
-# Web: http://localhost:8080   API: http://localhost:3000/api   API docs: http://localhost:3000/api/docs
+# Web: http://localhost:8080   API: http://localhost:8080/api   API docs: http://localhost:8080/api/docs
+# Local demo only: demo sign-in is on. Never run this file on a shared or public server.
 # All credentials here are local demo values, not secrets.
 name: construction-erp
 
@@ -33,9 +34,16 @@ services:
       DATABASE_URL: postgresql://erp:erp@db:5432/erp_dev?schema=public
       CORS_ORIGIN: http://localhost:8080,http://localhost:5173
       APP_VERSION: ${APP_VERSION:-0.0.0-dev}
+      # Local demo stack: demo sign-in on, fake demo users' password, behind nginx.
+      AUTH_DEMO_LOGIN: 'true'
+      DEMO_USER_PASSWORD: local-demo-only-2026
+      TRUST_PROXY: 'true'
     restart: unless-stopped
-    ports:
-      - '${API_PORT:-3000}:3000'
+    # Not published on the host: the API is reached through the web server at
+    # http://localhost:8080/api (docs at /api/docs), so client addresses (X-Forwarded-For from
+    # nginx) can be trusted for sign-in throttling.
+    expose:
+      - '3000'
     depends_on:
       db:
         condition: service_healthy

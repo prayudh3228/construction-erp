@@ -3,5 +3,5 @@
 useDefault = true
 
 [allowlist]
-description = "Local demo credentials (erp/erp) used only for Docker Compose and tests"
-regexes = ['''postgres(ql)?://erp:erp@''']
+description = "Local demo credentials (erp/erp, demo users) used only for Docker Compose and tests"
+regexes = ['''postgres(ql)?://erp:erp@''', '''local-demo-only-2026''']

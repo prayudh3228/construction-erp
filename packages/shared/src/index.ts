@@ -6,3 +6,6 @@ export * from './theme/index.js';
 export * from './navigation/index.js';
 export * from './branding.js';
 export * from './auth/login.js';
+export * from './auth/password-policy.js';
+export * from './auth/roles.js';
+export * from './auth/api.js';

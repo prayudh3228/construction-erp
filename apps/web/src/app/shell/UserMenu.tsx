@@ -1,5 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Activity, LogOut, Palette } from 'lucide-react';
+import { Activity, KeyRound, LogOut, Palette } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,7 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui/toaster';
 import { isDemoMode } from '@/lib/env';
-import { type Session, sessionStore } from '../session';
+import { type Session, authClient, clearSession } from '../auth';
 
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -22,11 +23,16 @@ export function initials(name: string): string {
 
 export function UserMenu({ session }: { session: Session }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
-  const signOut = () => {
-    sessionStore.set(null);
+  const signOut = async () => {
+    // Even if the server cannot be reached, forget the session in this tab.
+    await authClient()
+      .logout()
+      .catch(() => undefined);
+    clearSession(queryClient);
     toast.success('You have signed out.');
-    void navigate({ to: '/login' });
+    await navigate({ to: '/login', search: { reason: 'signed-out' } });
   };
 
   return (
@@ -61,13 +67,19 @@ export function UserMenu({ session }: { session: Session }) {
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
+          <Link to="/change-password">
+            <KeyRound aria-hidden />
+            Change password
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link to="/status">
             <Activity aria-hidden />
             System status
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={signOut}>
+        <DropdownMenuItem onSelect={() => void signOut()}>
           <LogOut aria-hidden />
           Sign out
         </DropdownMenuItem>

@@ -14,7 +14,7 @@ import { type ColumnDef } from '@tanstack/react-table';
 import { Briefcase, Lock, SearchX } from 'lucide-react';
 import { type ReactNode, useMemo } from 'react';
 import { usePageTitle } from '@/app/page-title';
-import { useSession } from '@/app/session';
+import { useSession } from '@/app/auth';
 import { DEPARTMENT_ICONS } from '@/app/shell/department-icons';
 import { projectsForDepartment } from '@/app/shell/ProjectSwitcher';
 import { useCurrentDepartment, useProjectScope } from '@/app/shell/use-project-scope';

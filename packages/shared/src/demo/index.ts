@@ -4,3 +4,4 @@
  */
 export * from './projects.js';
 export * from './user.js';
+export * from './accounts.js';

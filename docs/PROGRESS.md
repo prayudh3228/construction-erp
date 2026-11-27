@@ -4,11 +4,20 @@ A fresh session should be able to resume from this file alone.
 
 ## Status
 
-- **Current phase:** 1b (Mobile shell), built on branch `phase-01b-mobile-shell` (branched from `phase-01-design-shells`, which is not merged yet because the push was refused: wrong GitHub account on this machine), awaiting approval.
-- **Next phase:** 2 (Authentication). Do not start it without approval.
+- **Current phase:** 2a (Authentication core), built on branch `phase-02a-auth-core`, awaiting approval. Phase 1a and 1b are merged (PRs #2, #3).
+- Phase 2 is split: **2a** users, passwords, sessions/timeouts, lockout, sign-in/out, password change (this); **2b** two-factor (TOTP + recovery codes) for Admin/Director/Finance; **2c** user admin (create, deactivate leavers, reset password) and phone sign-in with secure storage.
+- **Next:** 2b. Do not start it without approval.
 - Phase 1 was split into 1a (web) and 1b (mobile) because it was too big for one PR.
 
 ## Done
+
+### Phase 2a: Authentication core (26-11-2026)
+
+- API: `users` and `sessions` tables (+ CHECK constraints), scrypt hashing with upgrade-on-login, server-side sessions (token hash only), web cookie / mobile Bearer, idle and absolute timeouts (web 30 min / 12 h, mobile 7 d / 30 d), lockout (5 then 15 min), generic failure message with dummy hash, leaver deactivation ends sessions, password change ends other sessions, must-change-password gate, `GET /auth/sessions`, demo-only sign-in (refused in production), global guard with `@Public()`, CSRF client header.
+- Shared: password policy (NIST style) with messages, provisional role keys (`MFA_REQUIRED_ROLES`), demo accounts, auth API schemas and error codes.
+- Web: real sign-in (password + demo accounts), change-password page with live checklist, forced change for new starters, session timeout warning, any 401 returns to sign-in, server-unreachable page, sign-out.
+- Seeds: one demo user per role, a new starter and a leaver (password from `DEMO_USER_PASSWORD`).
+- Fresh-eyes security review: no authentication bypass found; 11 items, 10 fixed: parallel guesses could get past the lockout (now each try is reserved atomically before the password check); no per-address throttling (added, failures only) or hashing cap (added); change-password could be used to guess the password (now counts towards lockout and ends all sessions at the limit); web blank screen when the session vanished (now returns to sign-in); countdown could run up to a minute past the server's deadline (now counts down a minute early); a sign-in racing a password change could keep a session, and the changing session kept its token (now every session ends and a new one opens; older sessions refused); demo sign-in on a non-production deployment (startup warning, Compose comment, API no longer on its own port); signing in over a session left it open (now ended); email sign-in promised but missing (now supported). Not fixed, recorded in NOT_COVERED: slightly faster answers for accounts hashed at an older cost.
 
 ### Phase 1b: Mobile shell (26-11-2026)
 
@@ -62,6 +71,14 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Gotchas
 
+- Every API route is signed-in-only by default (global `AuthGuard`). Mark public routes with `@Public()`; routes a must-change-password user may use with `@AllowWhilePasswordChangeRequired()`.
+- In Docker the API is only reachable through nginx at http://localhost:8080/api (no port 3000 on the host). For local API work use `pnpm dev` (API on :3000).
+- Every non-GET request needs `x-erp-client: web|mobile` or the API answers 403 `CLIENT_HEADER_MISSING`. The web `apiFetch` adds it.
+- API integration tests: `createTestApp(overrides, { clock })` with `FakeClock` to move time; `PASSWORD_HASH_COST` is 12 in tests (production enforces at least 17). Test users use the `zz.` username prefix and are deleted after each test.
+- Web unit tests run against `FakeAuth` (`src/test/fake-auth.ts`); `signIn(access, name, extra)` starts a test signed in. `resetApiActivity()` runs before each test (module state).
+- E2E password sign-ins can take a few seconds under parallel load (production-cost scrypt in Docker); `auth.spec.ts` allows 15 s for those steps only.
+- Seeding needs `DEMO_USER_PASSWORD` (Compose and CI set it; locally it is in `apps/api/.env`).
+
 - Mobile: add Expo packages with `pnpm exec expo install <pkg>` (picks SDK-matching versions), run from `apps/mobile`. It is slow on Windows (minutes).
 - Mobile Jest: Testing Library v14 `fireEvent` returns a promise; always `await` it (and `await act(async () => ...)`), or updates leak into the next test. `jest.setup.ts` unmounts before resetting the shared stores.
 - Mobile Jest `transformIgnorePatterns` is the Expo pnpm pattern plus `standard-navigation` (an ESM-only dependency of expo-router).
@@ -87,6 +104,7 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Decisions log
 
+- 26-11-2026: Phase 2 split into 2a/2b/2c. Server-side sessions (A32), scrypt (A33), lockout and generic messages (A34). Q1 to be answered by the owner before Phase 5; Q2 deferred to the end.
 - 26-11-2026: Phase 1b built on top of the unmerged 1a branch. System font on mobile (A25), single current site on the phone (A26).
 - 26-11-2026: Phase 1 split into 1a (web) and 1b (mobile). TanStack Table v8 over v9 (A15). Demo mode build flag (A19). Q4 assumed: GitHub Actions is the gate, plus a full local run before each PR.
 
@@ -94,7 +112,7 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Phase list
 
-A. Foundation: 0 Repo and tooling · 1a Design system and web shell · 1b Mobile shell · 2 Authentication · 3 Roles and permissions · 4 Audit log and settings · 5 Project master and cost codes · 6 Party master (milestone)
+A. Foundation: 0 Repo and tooling · 1a Design system and web shell · 1b Mobile shell · 2a Auth core · 2b Two-factor · 2c User admin and phone sign-in · 3 Roles and permissions · 4 Audit log and settings · 5 Project master and cost codes · 6 Party master (milestone)
 B. Planning: 7 Intake and documents · 8 Estimates and budget · 9 Schedule and completion tracking
 C. Purchase: 10 Indent · 11 RFQ and quotes · 12 Purchase order (milestone)
 D. Stores and hire: 13 Goods receipt and stock ledger · 14 Issues and transfers · 15 Hired items

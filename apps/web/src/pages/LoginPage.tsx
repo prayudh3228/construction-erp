@@ -1,32 +1,48 @@
-import { type LoginForm, loginFormSchema } from '@erp/shared';
+import { type LoginForm, type LoginResponse, ROLE_LABELS, loginFormSchema } from '@erp/shared';
+import { DEMO_ACCOUNTS } from '@erp/shared/demo';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
 import { getRouteApi, useNavigate } from '@tanstack/react-router';
-import { Info } from 'lucide-react';
+import { CircleX, Info } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { isApiError } from '@/api/client';
+import { authClient, meQueryKey } from '@/app/auth';
 import { useBranding } from '@/app/branding';
 import { usePageTitle } from '@/app/page-title';
 import { safeRedirectPath } from '@/app/redirect';
-import { startDemoSession } from '@/app/session';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
-import { Input } from '@/components/ui/input';
+import { Input, NativeSelect } from '@/components/ui/input';
 import { toast } from '@/components/ui/toaster';
 import { isDemoMode } from '@/lib/env';
 
 const route = getRouteApi('/login');
 
+const REASON_NOTICE = {
+  expired: 'Your session ended because of inactivity or the daily limit. Please sign in again.',
+  'signed-out': 'You have signed out.',
+} as const;
+
+function messageOf(error: unknown): string {
+  return isApiError(error) ? error.message : 'Sign-in failed. Please try again.';
+}
+
 export function LoginPage() {
   const branding = useBranding();
   usePageTitle('Sign in');
   const navigate = useNavigate();
-  const { redirect } = route.useSearch();
+  const queryClient = useQueryClient();
+  const { redirect, reason } = route.useSearch();
   const demo = isDemoMode();
-  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [demoBusy, setDemoBusy] = useState<string | null>(null);
+  const [otherDemo, setOtherDemo] = useState(DEMO_ACCOUNTS[1]?.username ?? '');
 
   const {
     register,
     handleSubmit,
+    resetField,
     formState: { errors, isSubmitting },
   } = useForm<LoginForm>({
     resolver: zodResolver(loginFormSchema),
@@ -34,20 +50,34 @@ export function LoginPage() {
     defaultValues: { username: '', password: '' },
   });
 
-  const goIn = () => {
-    startDemoSession();
-    toast.success('Signed in as the demo user.');
-    void navigate({ href: safeRedirectPath(redirect) });
+  const enter = async (response: LoginResponse) => {
+    queryClient.setQueryData(meQueryKey, { user: response.user, session: response.session });
+    toast.success(`Signed in as ${response.user.displayName}.`);
+    if (response.user.mustChangePassword) await navigate({ to: '/change-password' });
+    else await navigate({ href: safeRedirectPath(redirect) });
   };
 
-  // Phase 2 replaces this with the real sign-in call. Until then no password is accepted.
-  const onSubmit = handleSubmit(() => {
-    setNotice(
-      demo
-        ? 'Password sign-in is switched on in the next phase. For now, use "Continue as demo user".'
-        : 'Password sign-in is not switched on yet.',
-    );
+  const onSubmit = handleSubmit(async ({ username, password }) => {
+    setError(null);
+    try {
+      await enter(await authClient().login(username, password));
+    } catch (e) {
+      setError(messageOf(e));
+      resetField('password');
+    }
   });
+
+  const demoSignIn = async (username: string) => {
+    setError(null);
+    setDemoBusy(username);
+    try {
+      await enter(await authClient().demoLogin(username));
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setDemoBusy(null);
+    }
+  };
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1fr_minmax(28rem,36rem)]">
@@ -82,14 +112,52 @@ export function LoginPage() {
             </p>
           </div>
 
+          {reason && !error && (
+            <div
+              role="status"
+              className="flex gap-2 rounded-lg border border-info/25 bg-info-subtle p-3 text-sm text-info-foreground"
+            >
+              <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <p>{REASON_NOTICE[reason]}</p>
+            </div>
+          )}
+
           {demo && (
             <div className="space-y-3 rounded-xl border border-border bg-surface p-4 shadow-xs">
               <p className="text-sm text-muted-foreground">
                 This is a demo with fake data. No password is needed.
               </p>
-              <Button size="lg" className="w-full" onClick={goIn}>
+              <Button
+                size="lg"
+                className="w-full"
+                loading={demoBusy === DEMO_ACCOUNTS[0]?.username}
+                disabled={demoBusy !== null}
+                onClick={() => void demoSignIn(DEMO_ACCOUNTS[0]!.username)}
+              >
                 Continue as demo user
               </Button>
+              <div className="flex gap-2">
+                <NativeSelect
+                  aria-label="Other demo account"
+                  value={otherDemo}
+                  onChange={(e) => setOtherDemo(e.target.value)}
+                >
+                  {DEMO_ACCOUNTS.slice(1).map((a) => (
+                    <option key={a.username} value={a.username}>
+                      {a.displayName} ({ROLE_LABELS[a.role]})
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Button
+                  variant="outline"
+                  loading={demoBusy === otherDemo}
+                  disabled={demoBusy !== null}
+                  onClick={() => void demoSignIn(otherDemo)}
+                >
+                  Sign in
+                  <span className="sr-only"> as the selected demo account</span>
+                </Button>
+              </div>
             </div>
           )}
 
@@ -100,13 +168,13 @@ export function LoginPage() {
             <FormField label="Password" error={errors.password?.message} required>
               <Input type="password" autoComplete="current-password" {...register('password')} />
             </FormField>
-            {notice && (
+            {error && (
               <div
-                role="status"
-                className="flex gap-2 rounded-lg border border-info/25 bg-info-subtle p-3 text-sm text-info-foreground"
+                role="alert"
+                className="flex gap-2 rounded-lg border border-danger/25 bg-danger-subtle p-3 text-sm text-danger-foreground"
               >
-                <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
-                <p>{notice}</p>
+                <CircleX className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <p>{error}</p>
               </div>
             )}
             <Button

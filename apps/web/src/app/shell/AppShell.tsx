@@ -1,5 +1,5 @@
 import { visibleDepartments } from '@erp/shared';
-import { Outlet, useRouterState } from '@tanstack/react-router';
+import { Outlet, useRouter, useRouterState } from '@tanstack/react-router';
 import { Menu } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,8 @@ import { cn } from '@/lib/cn';
 import { isDemoMode } from '@/lib/env';
 import { readStorage, writeStorage } from '@/lib/storage';
 import { useBranding } from '../branding';
-import { useSession } from '../session';
+import { useSession } from '../auth';
+import { SessionTimeoutWarning } from './SessionTimeoutWarning';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { Sidebar } from './Sidebar';
 import { UserMenu } from './UserMenu';
@@ -27,6 +28,16 @@ export function AppShell() {
   const department = useCurrentDepartment();
   const [collapsed, setCollapsed] = useState(() => readStorage('local', COLLAPSED_KEY) === '1');
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const router = useRouter();
+
+  // The session vanished while this page was open (the server said it has ended): go to
+  // sign-in and say why, instead of leaving an empty page. A sign-out already on its way to
+  // the login page is left alone.
+  useEffect(() => {
+    if (session || router.state.location.pathname === '/login') return;
+    const { href } = router.state.location;
+    void router.navigate({ to: '/login', search: { reason: 'expired', redirect: href } });
+  }, [session, router]);
   // The drawer remembers the page it was opened on, so it closes by itself when the page
   // changes (back button, links inside the page) without an effect.
   const [drawerPath, setDrawerPath] = useState<string | null>(null);
@@ -118,6 +129,7 @@ export function AppShell() {
               </Badge>
             )}
             <UserMenu session={session} />
+            <SessionTimeoutWarning session={session} />
           </div>
         </header>
 

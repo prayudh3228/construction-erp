@@ -11,13 +11,14 @@ import { Suspense, lazy } from 'react';
 import { LoadingState } from '@/components/states';
 import { isDemoMode } from '@/lib/env';
 import { DepartmentPage } from '@/pages/DepartmentPage';
+import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { StatusPage } from '@/pages/StatusPage';
-import { RootLayout } from './RootLayout';
+import { RootErrorPage, RootLayout } from './RootLayout';
 import { safeRedirectPath } from './redirect';
 import { parseSearch, stringifySearch } from './search-params';
-import { sessionStore } from './session';
+import { meQuery, toSession } from './auth';
 import { AppShell } from './shell/AppShell';
 
 // Demo-only page: loaded on demand so it is not in the main bundle.
@@ -43,17 +44,40 @@ function validateAppSearch(search: Record<string, unknown>): AppSearch {
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
   notFoundComponent: NotFoundPage,
+  // Shown when the session cannot be checked at all (API down, network lost).
+  errorComponent: RootErrorPage,
 });
+
+export interface LoginSearch {
+  redirect?: string;
+  /** "expired" when the session ended by itself, "signed-out" after signing out. */
+  reason?: 'expired' | 'signed-out';
+}
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'login',
-  validateSearch: (s: Record<string, unknown>): { redirect?: string } =>
-    typeof s.redirect === 'string' ? { redirect: s.redirect } : {},
-  beforeLoad: ({ search }) => {
-    if (sessionStore.get()) throw redirect({ href: safeRedirectPath(search.redirect) });
+  validateSearch: (s: Record<string, unknown>): LoginSearch => ({
+    ...(typeof s.redirect === 'string' ? { redirect: s.redirect } : {}),
+    ...(s.reason === 'expired' || s.reason === 'signed-out' ? { reason: s.reason } : {}),
+  }),
+  beforeLoad: async ({ search, context }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (me?.user.mustChangePassword) throw redirect({ to: '/change-password' });
+    if (me) throw redirect({ href: safeRedirectPath(search.redirect) });
   },
   component: LoginPage,
+});
+
+/** Standalone (no shell): a user who must change their password can open nothing else. */
+const changePasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'change-password',
+  beforeLoad: async ({ context, location }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me) throw redirect({ to: '/login', search: { redirect: location.href } });
+  },
+  component: ChangePasswordPage,
 });
 
 const statusRoute = createRoute({
@@ -62,15 +86,15 @@ const statusRoute = createRoute({
   component: StatusPage,
 });
 
-/** Everything behind sign-in. Phase 2 replaces the demo session check with a real one. */
+/** Everything behind sign-in. The server decides: the session comes from GET /api/auth/me. */
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'app',
   validateSearch: validateAppSearch,
-  beforeLoad: ({ location }) => {
-    if (!sessionStore.get()) {
-      throw redirect({ to: '/login', search: { redirect: location.href } });
-    }
+  beforeLoad: async ({ location, context }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me) throw redirect({ to: '/login', search: { redirect: location.href } });
+    if (me.user.mustChangePassword) throw redirect({ to: '/change-password' });
   },
   component: AppShell,
   notFoundComponent: NotFoundPage,
@@ -79,9 +103,9 @@ const appRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/',
-  beforeLoad: ({ search }) => {
-    const session = sessionStore.get();
-    const first = session ? visibleDepartments(session.access)[0] : undefined;
+  beforeLoad: ({ search, context }) => {
+    const me = context.queryClient.getQueryData(meQuery.queryKey);
+    const first = me ? visibleDepartments(toSession(me).access)[0] : undefined;
     if (first) {
       throw redirect({ to: '/$departmentId', params: { departmentId: first.id }, search });
     }
@@ -112,6 +136,7 @@ export const departmentRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   loginRoute,
+  changePasswordRoute,
   statusRoute,
   appRoute.addChildren([indexRoute, designSystemRoute, departmentRoute]),
 ]);

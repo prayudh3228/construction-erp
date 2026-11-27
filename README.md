@@ -12,11 +12,11 @@ Requires Docker.
 docker compose up --build
 ```
 
-- Web app: http://localhost:8080 (demo mode: click **Continue as demo user**; fake data only)
-- API: http://localhost:3000/api (health: `/api/health`, docs: `/api/docs`)
+- Web app: http://localhost:8080 (demo mode: click **Continue as demo user**, or sign in as any demo account such as `demo.finance` with the password `local-demo-only-2026`; fake data only)
+- API: through the web server at http://localhost:8080/api (health: `/api/health`, docs: `/api/docs`). The API container is not published on its own port, so sign-in throttling can trust the client address nginx passes on.
 - Postgres: localhost:5432 (user `erp`, password `erp`, database `erp_dev`; local demo values)
 
-Ports can be changed with `WEB_PORT`, `API_PORT` and `DB_PORT`. The API applies migrations and loads demo seeds on start.
+Ports can be changed with `WEB_PORT` and `DB_PORT`. The API applies migrations and loads demo seeds on start.
 
 ## Develop without Docker
 

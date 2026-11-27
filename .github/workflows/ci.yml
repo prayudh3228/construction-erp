@@ -48,6 +48,9 @@ jobs:
           --health-interval 3s --health-timeout 3s --health-retries 20
     env:
       DATABASE_URL: postgresql://erp:erp@localhost:5432/erp_test?schema=public
+      DEMO_USER_PASSWORD: local-demo-only-2026
+      # Lower hashing cost keeps the test run fast; production enforces at least 17.
+      PASSWORD_HASH_COST: '12'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

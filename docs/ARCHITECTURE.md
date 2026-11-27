@@ -70,6 +70,18 @@ A TypeScript monorepo (pnpm workspaces + Turborepo) with three apps and two pack
 - **Projects** come through a `ProjectsSource` interface like the web (`src/data/projects.ts`), with demo data from `@erp/shared/demo`.
 - **Tests:** `renderRouter` from `expo-router/testing-library` renders the real screens in Jest; NetInfo is replaced by a controllable mock (`src/test/netinfo-mock.ts`).
 
+## Authentication (Phase 2a)
+
+- **Global guard:** every API route needs a valid session unless marked `@Public()` (health, sign-in). The guard runs `AuthService.authenticate` on every request: unknown or revoked token, idle or absolute timeout, or a deactivated user all answer 401, so access ends at once. Users with `must_change_password` can only call `me`, `logout` and `change-password` (403 `PASSWORD_CHANGE_REQUIRED` elsewhere).
+- **Endpoints** (`/api/auth`): `POST login`, `POST demo-login` (demo only), `POST logout`, `GET me` (user + when the session ends), `GET sessions` (your devices), `POST change-password` (signs out your other devices).
+- **Transport:** web gets an httpOnly, SameSite=Lax cookie scoped to `/api`; phones get the token in the login answer and send `Authorization: Bearer`. Every write needs the `x-erp-client` header (CSRF defence, `client-header.middleware.ts`).
+- **Errors** share one body, `{ statusCode, code, message, details? }` (`apiError()`), with codes in `AUTH_ERROR_CODES`.
+- **Lockout without races:** each sign-in attempt is reserved in one atomic `UPDATE ... RETURNING` before the password is checked, so a burst of parallel guesses gets at most `AUTH_MAX_FAILED_LOGINS` checks. Wrong current passwords on change-password count too, and reaching the limit ends every session.
+- **Throttling:** `AttemptLimiter` refuses (429) a network address after too many failures; `HashGate` caps concurrent scrypt work (503 when flooded).
+- **Password change** ends every session, including the one that made the change, and opens a new one (new cookie/token). Sessions created before `password_changed_at` are refused.
+- **Time** comes from an injectable `CLOCK`, so tests fast-forward through timeouts and lockouts.
+- **Web:** the session is `GET /api/auth/me` cached by TanStack Query (`src/app/auth.ts`); router guards read it. Any 401 from any request returns to sign-in (`query-client.ts`). `SessionTimeoutWarning` warns two minutes before the end and confirms with the server before signing out (a wrong PC clock never signs anyone out).
+
 ## Seeds
 
-`apps/api/prisma/seed/seeds.ts` lists named seeds. The runner applies each one once, inside a transaction holding a Postgres advisory lock, and records it in `seed_runs`, so seeding is safe to repeat and safe when several API containers start together. Change demo data by adding a new seed, not by editing an applied one. The seed command refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`.
+`apps/api/prisma/seed/seeds.ts` lists named seeds. The runner applies each one once, inside a transaction holding a Postgres advisory lock, and records it in `seed_runs`, so seeding is safe to repeat and safe when several API containers start together. Change demo data by adding a new seed, not by editing an applied one. The seed command refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`. Demo users (`0001-demo-users`) take their password from `DEMO_USER_PASSWORD`.
