@@ -11,14 +11,17 @@ import { Suspense, lazy } from 'react';
 import { LoadingState } from '@/components/states';
 import { isDemoMode } from '@/lib/env';
 import { DepartmentPage } from '@/pages/DepartmentPage';
+import { AccountSecurityPage } from '@/pages/AccountSecurityPage';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { StatusPage } from '@/pages/StatusPage';
+import { TwoFactorSetupPage } from '@/pages/TwoFactorSetupPage';
+import { TwoFactorVerifyPage } from '@/pages/TwoFactorVerifyPage';
 import { RootErrorPage, RootLayout } from './RootLayout';
 import { safeRedirectPath } from './redirect';
 import { parseSearch, stringifySearch } from './search-params';
-import { meQuery, toSession } from './auth';
+import { meQuery, pendingStep, toSession } from './auth';
 import { AppShell } from './shell/AppShell';
 
 // Demo-only page: loaded on demand so it is not in the main bundle.
@@ -63,10 +66,53 @@ const loginRoute = createRoute({
   }),
   beforeLoad: async ({ search, context }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
-    if (me?.user.mustChangePassword) throw redirect({ to: '/change-password' });
-    if (me) throw redirect({ href: safeRedirectPath(search.redirect) });
+    if (!me) return;
+    const step = pendingStep(me);
+    if (step) throw redirect({ to: step, search: { redirect: search.redirect } });
+    throw redirect({ href: safeRedirectPath(search.redirect) });
   },
   component: LoginPage,
+});
+
+/** Where to go once the remaining sign-in steps are done. */
+export interface StepSearch {
+  redirect?: string;
+}
+const validateStepSearch = (s: Record<string, unknown>): StepSearch =>
+  typeof s.redirect === 'string' ? { redirect: s.redirect } : {};
+
+/** Second sign-in step: a code from the authenticator app, or a recovery code. */
+const twoFactorRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'two-factor',
+  validateSearch: validateStepSearch,
+  beforeLoad: async ({ context, search }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me) throw redirect({ to: '/login', search: { redirect: search.redirect } });
+    if (me.session.stage !== 'mfa_verify') {
+      throw redirect({ href: safeRedirectPath(search.redirect) });
+    }
+  },
+  component: TwoFactorVerifyPage,
+});
+
+/**
+ * Set up an authenticator app: required before anything else for Admin, Director and Finance;
+ * optional for everyone else (opened from Account security).
+ */
+const twoFactorSetupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'two-factor/setup',
+  validateSearch: validateStepSearch,
+  beforeLoad: async ({ context, search }) => {
+    const me = await context.queryClient.ensureQueryData(meQuery);
+    if (!me) throw redirect({ to: '/login', search: { redirect: search.redirect } });
+    if (me.session.stage === 'mfa_verify') throw redirect({ to: '/two-factor', search });
+    if (me.session.stage === 'full' && me.user.mfa.enabled) {
+      throw redirect({ href: safeRedirectPath(search.redirect) });
+    }
+  },
+  component: TwoFactorSetupPage,
 });
 
 /** Standalone (no shell): a user who must change their password can open nothing else. */
@@ -76,6 +122,9 @@ const changePasswordRoute = createRoute({
   beforeLoad: async ({ context, location }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me) throw redirect({ to: '/login', search: { redirect: location.href } });
+    const step = pendingStep(me);
+    // Two-factor comes before changing the password.
+    if (step && step !== '/change-password') throw redirect({ to: step });
   },
   component: ChangePasswordPage,
 });
@@ -94,7 +143,8 @@ const appRoute = createRoute({
   beforeLoad: async ({ location, context }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me) throw redirect({ to: '/login', search: { redirect: location.href } });
-    if (me.user.mustChangePassword) throw redirect({ to: '/change-password' });
+    const step = pendingStep(me);
+    if (step) throw redirect({ to: step, search: { redirect: location.href } });
   },
   component: AppShell,
   notFoundComponent: NotFoundPage,
@@ -127,6 +177,12 @@ const designSystemRoute = createRoute({
     ),
 });
 
+const accountSecurityRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'account/security',
+  component: AccountSecurityPage,
+});
+
 export const departmentRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '$departmentId',
@@ -136,9 +192,11 @@ export const departmentRoute = createRoute({
 
 export const routeTree = rootRoute.addChildren([
   loginRoute,
+  twoFactorRoute,
+  twoFactorSetupRoute,
   changePasswordRoute,
   statusRoute,
-  appRoute.addChildren([indexRoute, designSystemRoute, departmentRoute]),
+  appRoute.addChildren([indexRoute, designSystemRoute, accountSecurityRoute, departmentRoute]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {

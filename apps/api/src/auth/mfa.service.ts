@@ -55,7 +55,7 @@ export class MfaService {
   }
 
   /**
-   * Start setting up: make a new secret (stored encrypted, not yet active) for the app to scan.
+   * Start setting up: a secret (stored encrypted, not active until confirmed) for the app to scan.
    * Allowed while half-signed-in for setup, or when fully signed in with two-factor off.
    */
   async startSetup({ user, session }: Authenticated): Promise<MfaSetupResponse> {
@@ -66,11 +66,16 @@ export class MfaService {
         'Two-factor sign-in is already on for this account.',
       );
     }
-    const secret = newTotpSecret();
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { totpSecret: this.box.encrypt(secret), totpLastStep: null },
-    });
+    // While a setup is pending (secret made, not yet confirmed) hand out the same secret, so a
+    // page opened twice or a double click never leaves the app and the server disagreeing.
+    let secret = user.totpSecret ? this.box.decrypt(user.totpSecret) : null;
+    if (!secret) {
+      secret = newTotpSecret();
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { totpSecret: this.box.encrypt(secret), totpLastStep: null },
+      });
+    }
     return {
       secret,
       otpauthUri: otpauthUri(secret, user.username, defaultBranding.productName),

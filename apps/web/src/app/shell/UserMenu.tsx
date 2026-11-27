@@ -67,9 +67,9 @@ export function UserMenu({ session }: { session: Session }) {
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
-          <Link to="/change-password">
+          <Link to="/account/security">
             <KeyRound aria-hidden />
-            Change password
+            Account security
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

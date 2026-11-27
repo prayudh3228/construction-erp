@@ -133,6 +133,12 @@ describe('setting up', () => {
     expect(row.totpEnabledAt).toBeNull();
   });
 
+  it('asking again while setup is pending gives the same secret (page opened twice, double click)', async () => {
+    const { cookie, secret } = await pendingSetup();
+    const again = await post('/mfa/setup', cookie).expect(200);
+    expect(again.body.secret).toBe(secret);
+  });
+
   it('a wrong code does not switch it on', async () => {
     const { cookie } = await pendingSetup();
     const res = await post('/mfa/enable', cookie, { code: '000000' }).expect(400);

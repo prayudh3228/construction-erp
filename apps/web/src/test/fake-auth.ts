@@ -11,6 +11,17 @@ import { ApiRequestError } from '@/api/client';
 import { type AuthClient, setAccessResolver, setAuthClient } from '@/app/auth';
 
 export const FAKE_PASSWORD = 'river stone lantern 47';
+/** The one authenticator code the fake API accepts, and its one recovery code. */
+export const FAKE_TOTP = '246810';
+export const FAKE_RECOVERY = 'ABCDE-FGHJK';
+export const FAKE_RECOVERY_CODES = Array.from({ length: 10 }, (_, i) => `CODE${i}-ABCDE`);
+
+const wrongCode = () =>
+  new ApiRequestError(
+    400,
+    'INVALID_MFA_CODE',
+    'That code is not right, or has already been used. Codes change every 30 seconds.',
+  );
 
 export function fakeMe(
   user: Partial<AuthUser> = {},
@@ -25,9 +36,11 @@ export function fakeMe(
       email: 'test.user@example.com',
       role: 'site',
       mustChangePassword: false,
+      mfa: { enabled: false, required: false },
       ...user,
     },
     session: {
+      stage: 'full',
       idleExpiresAt: new Date(now + 30 * 60_000).toISOString(),
       absoluteExpiresAt: new Date(now + 12 * 3_600_000).toISOString(),
       idleTimeoutSeconds: 30 * 60,
@@ -58,10 +71,104 @@ export class FakeAuth implements AuthClient {
     return this.current;
   });
 
+  /**
+   * Usernames choose the case: "...mfa-on..." has two-factor on (enter a code),
+   * "...mfa-setup..." must set it up first; anything else is signed in at once.
+   */
   login = vi.fn(async (username: string, password: string): Promise<LoginResponse> => {
     if (password !== FAKE_PASSWORD) throw failed();
-    this.current = fakeMe({ username, displayName: 'Asha Rao' });
+    if (username.includes('mfa-on')) {
+      this.current = fakeMe(
+        {
+          username,
+          displayName: 'Asha Rao',
+          role: 'finance',
+          mfa: { enabled: true, required: true },
+        },
+        { stage: 'mfa_verify' },
+      );
+    } else if (username.includes('mfa-setup')) {
+      this.current = fakeMe(
+        {
+          username,
+          displayName: 'Asha Rao',
+          role: 'finance',
+          mfa: { enabled: false, required: true },
+        },
+        { stage: 'mfa_setup' },
+      );
+    } else {
+      this.current = fakeMe({ username, displayName: 'Asha Rao' });
+    }
     return this.current;
+  });
+
+  /** Wrong codes before the fake API locks the account (answers 401). */
+  wrongCodesLeft = 5;
+  recoveryCodesLeft = 10;
+
+  private checkCode(code: string) {
+    if (code.replace(/\s/g, '') === FAKE_TOTP) return;
+    this.wrongCodesLeft -= 1;
+    if (this.wrongCodesLeft <= 0) {
+      this.current = null;
+      throw new ApiRequestError(401, 'UNAUTHENTICATED', 'Please sign in.');
+    }
+    throw wrongCode();
+  }
+
+  private fullSession(mfaEnabled: boolean): MeResponse {
+    const current = this.current!;
+    this.current = {
+      user: { ...current.user, mfa: { ...current.user.mfa, enabled: mfaEnabled } },
+      session: { ...current.session, stage: 'full' },
+    };
+    return this.current;
+  }
+
+  mfaStatus = vi.fn(async () => ({
+    enabled: this.current?.user.mfa.enabled ?? false,
+    required: this.current?.user.mfa.required ?? false,
+    recoveryCodesLeft: this.current?.user.mfa.enabled ? this.recoveryCodesLeft : 0,
+  }));
+
+  mfaSetup = vi.fn(async () => ({
+    secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+    otpauthUri:
+      'otpauth://totp/Construction%20ERP:test.user?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Construction+ERP',
+  }));
+
+  mfaEnable = vi.fn(async (code: string) => {
+    this.checkCode(code);
+    return { ...this.fullSession(true), recoveryCodes: FAKE_RECOVERY_CODES };
+  });
+
+  mfaVerify = vi.fn(async (input: { code: string } | { recoveryCode: string }) => {
+    if ('code' in input) this.checkCode(input.code);
+    else if (
+      input.recoveryCode.toUpperCase().replace(/[^A-Z0-9]/g, '') !== FAKE_RECOVERY.replace('-', '')
+    ) {
+      throw wrongCode();
+    }
+    return this.fullSession(true);
+  });
+
+  mfaRegenerateCodes = vi.fn(async (code: string) => {
+    this.checkCode(code);
+    this.recoveryCodesLeft = 10;
+    return FAKE_RECOVERY_CODES;
+  });
+
+  mfaDisable = vi.fn(async (code: string) => {
+    if (this.current?.user.mfa.required) {
+      throw new ApiRequestError(
+        403,
+        'MFA_CANNOT_DISABLE',
+        'Your role must use two-factor sign-in.',
+      );
+    }
+    this.checkCode(code);
+    return this.fullSession(false);
   });
 
   demoLogin = vi.fn(async (username: string): Promise<LoginResponse> => {

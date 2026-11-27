@@ -11,6 +11,7 @@ const MIN = 60_000;
 describe('timeoutState', () => {
   const start = Date.parse('2026-11-26T04:30:00Z');
   const info = {
+    stage: 'full' as const,
     idleExpiresAt: new Date(start + 30 * MIN).toISOString(),
     absoluteExpiresAt: new Date(start + 12 * 60 * MIN).toISOString(),
     idleTimeoutSeconds: 30 * 60,
@@ -106,7 +107,9 @@ describe('must change password', () => {
     const { user, router } = renderApp('/finance');
     await screen.findByRole('heading', { level: 1, name: 'Accounts and finance' });
     await user.click(screen.getByRole('button', { name: 'Account menu for Asha Rao' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Change password' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Account security' }));
+    await screen.findByRole('heading', { level: 1, name: 'Account security' });
+    await user.click(screen.getByRole('link', { name: 'Change password' }));
     expect(await screen.findByRole('heading', { name: 'Change password' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(router.state.location.pathname).not.toBe('/change-password'));

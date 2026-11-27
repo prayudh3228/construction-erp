@@ -4,10 +4,17 @@ import {
   type DepartmentAccess,
   type LoginResponse,
   type MeResponse,
+  type MfaEnableResponse,
+  type MfaSetupResponse,
+  type MfaStatus,
   ROLE_LABELS,
   type SessionInfo,
   loginResponseSchema,
   meResponseSchema,
+  mfaEnableResponseSchema,
+  mfaSetupResponseSchema,
+  mfaStatusSchema,
+  recoveryCodesResponseSchema,
 } from '@erp/shared';
 import { type QueryClient, queryOptions, useQuery } from '@tanstack/react-query';
 import { apiFetch, isApiError } from '@/api/client';
@@ -21,9 +28,35 @@ export interface AuthClient {
   logout(): Promise<void>;
   /** Opens a fresh session (new cookie) and returns it. */
   changePassword(currentPassword: string, newPassword: string): Promise<LoginResponse>;
+  mfaStatus(): Promise<MfaStatus>;
+  mfaSetup(): Promise<MfaSetupResponse>;
+  mfaEnable(code: string): Promise<MfaEnableResponse>;
+  mfaVerify(input: { code: string } | { recoveryCode: string }): Promise<LoginResponse>;
+  mfaRegenerateCodes(code: string): Promise<string[]>;
+  mfaDisable(code: string): Promise<MeResponse>;
 }
 
 export const httpAuthClient: AuthClient = {
+  mfaStatus: () => apiFetch('/auth/mfa', { schema: mfaStatusSchema }),
+  mfaSetup: () => apiFetch('/auth/mfa/setup', { method: 'POST', schema: mfaSetupResponseSchema }),
+  mfaEnable: (code) =>
+    apiFetch('/auth/mfa/enable', {
+      method: 'POST',
+      body: { code },
+      schema: mfaEnableResponseSchema,
+    }),
+  mfaVerify: (input) =>
+    apiFetch('/auth/mfa/verify', { method: 'POST', body: input, schema: loginResponseSchema }),
+  mfaRegenerateCodes: async (code) =>
+    (
+      await apiFetch('/auth/mfa/recovery-codes', {
+        method: 'POST',
+        body: { code },
+        schema: recoveryCodesResponseSchema,
+      })
+    ).recoveryCodes,
+  mfaDisable: (code) =>
+    apiFetch('/auth/mfa/disable', { method: 'POST', body: { code }, schema: meResponseSchema }),
   async me() {
     try {
       return await apiFetch('/auth/me', { schema: meResponseSchema });
@@ -112,4 +145,17 @@ export function isSignedOutError(e: unknown): boolean {
     e.status === 401 &&
     (e.code === AUTH_ERROR_CODES.unauthenticated || e.code === AUTH_ERROR_CODES.sessionExpired)
   );
+}
+
+export type SignInStep = '/two-factor' | '/two-factor/setup' | '/change-password';
+
+/**
+ * What a signed-in browser must do before it may use the app, in order: finish two-factor
+ * (enter a code, or set it up), then change the password if required. Null: nothing, go ahead.
+ */
+export function pendingStep(me: MeResponse): SignInStep | null {
+  if (me.session.stage === 'mfa_verify') return '/two-factor';
+  if (me.session.stage === 'mfa_setup') return '/two-factor/setup';
+  if (me.user.mustChangePassword) return '/change-password';
+  return null;
 }

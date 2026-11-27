@@ -7,7 +7,7 @@ import { CircleX, Info } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { isApiError } from '@/api/client';
-import { authClient, meQueryKey } from '@/app/auth';
+import { authClient, meQueryKey, pendingStep } from '@/app/auth';
 import { useBranding } from '@/app/branding';
 import { usePageTitle } from '@/app/page-title';
 import { safeRedirectPath } from '@/app/redirect';
@@ -51,10 +51,16 @@ export function LoginPage() {
   });
 
   const enter = async (response: LoginResponse) => {
-    queryClient.setQueryData(meQueryKey, { user: response.user, session: response.session });
+    const me = { user: response.user, session: response.session };
+    queryClient.setQueryData(meQueryKey, me);
+    const step = pendingStep(me);
+    if (step) {
+      // Password accepted; two-factor (or a password change) comes next.
+      await navigate({ to: step, search: { redirect } });
+      return;
+    }
     toast.success(`Signed in as ${response.user.displayName}.`);
-    if (response.user.mustChangePassword) await navigate({ to: '/change-password' });
-    else await navigate({ href: safeRedirectPath(redirect) });
+    await navigate({ href: safeRedirectPath(redirect) });
   };
 
   const onSubmit = handleSubmit(async ({ username, password }) => {
