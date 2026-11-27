@@ -33,10 +33,24 @@ export const authUserSchema = z.object({
   email: z.string().nullable(),
   role: roleKeySchema,
   mustChangePassword: z.boolean(),
+  mfa: z.object({
+    /** Two-factor sign-in is switched on for this user. */
+    enabled: z.boolean(),
+    /** The user's role must use two-factor sign-in (it cannot be switched off). */
+    required: z.boolean(),
+  }),
 });
 export type AuthUser = z.infer<typeof authUserSchema>;
 
+/**
+ * full: signed in. mfa_verify: password accepted, enter an authenticator or recovery code.
+ * mfa_setup: password accepted, but two-factor must be set up before anything else.
+ */
+export const SESSION_STAGES = ['full', 'mfa_verify', 'mfa_setup'] as const;
+export type SessionStage = (typeof SESSION_STAGES)[number];
+
 export const sessionInfoSchema = z.object({
+  stage: z.enum(SESSION_STAGES),
   /** ISO instants. The session ends at whichever comes first. */
   idleExpiresAt: z.string(),
   absoluteExpiresAt: z.string(),
@@ -62,6 +76,41 @@ export type DeviceSession = z.infer<typeof deviceSessionSchema>;
 export const loginResponseSchema = meResponseSchema.extend({ token: z.string().optional() });
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
+/** POST /api/auth/mfa/verify: an authenticator code, or one recovery code. */
+export const mfaVerifyRequestSchema = z.union([
+  z.object({ code: z.string().trim().min(1, 'Enter the 6-digit code.') }).strict(),
+  z.object({ recoveryCode: z.string().trim().min(1, 'Enter a recovery code.') }).strict(),
+]);
+export type MfaVerifyRequest = z.infer<typeof mfaVerifyRequestSchema>;
+
+/** POST /api/auth/mfa/setup: a new secret to add to the authenticator app (not yet active). */
+export const mfaSetupResponseSchema = z.object({
+  secret: z.string(),
+  otpauthUri: z.string(),
+});
+export type MfaSetupResponse = z.infer<typeof mfaSetupResponseSchema>;
+
+/** A code from the authenticator app, to confirm setup or protect a change. */
+export const mfaCodeRequestSchema = z.object({
+  code: z.string().trim().min(1, 'Enter the 6-digit code.'),
+});
+
+/** Shown once, right after they are made. Only hashes are stored. */
+export const recoveryCodesResponseSchema = z.object({ recoveryCodes: z.array(z.string()) });
+
+/** POST /api/auth/mfa/enable: two-factor is on; the session is fully signed in. */
+export const mfaEnableResponseSchema = loginResponseSchema.extend({
+  recoveryCodes: z.array(z.string()),
+});
+export type MfaEnableResponse = z.infer<typeof mfaEnableResponseSchema>;
+
+export const mfaStatusSchema = z.object({
+  enabled: z.boolean(),
+  required: z.boolean(),
+  recoveryCodesLeft: z.number().int().nonnegative(),
+});
+export type MfaStatus = z.infer<typeof mfaStatusSchema>;
+
 /** Machine-readable error codes the clients react to. */
 export const AUTH_ERROR_CODES = {
   invalidCredentials: 'INVALID_CREDENTIALS',
@@ -73,6 +122,10 @@ export const AUTH_ERROR_CODES = {
   clientHeaderMissing: 'CLIENT_HEADER_MISSING',
   demoLoginDisabled: 'DEMO_LOGIN_DISABLED',
   tooManyAttempts: 'TOO_MANY_ATTEMPTS',
+  mfaRequired: 'MFA_REQUIRED',
+  invalidMfaCode: 'INVALID_MFA_CODE',
+  mfaSetupNotStarted: 'MFA_SETUP_NOT_STARTED',
+  mfaCannotDisable: 'MFA_CANNOT_DISABLE',
   serverBusy: 'SERVER_BUSY',
 } as const;
 export type AuthErrorCode = (typeof AUTH_ERROR_CODES)[keyof typeof AUTH_ERROR_CODES];
