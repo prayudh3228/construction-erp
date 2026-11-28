@@ -12,7 +12,7 @@ Requires Docker.
 docker compose up --build
 ```
 
-- Web app: http://localhost:8080 (demo mode: click **Continue as demo user**, or sign in as any demo account such as `demo.finance` with the password `local-demo-only-2026`; fake data only)
+- Web app: http://localhost:8080 (demo mode: click **Continue as demo user**, or sign in as any demo account such as `demo.hr` with the password `local-demo-only-2026`; `demo.admin` also asks for an authenticator code: add the demo key `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` to an authenticator app; fake data only)
 - API: through the web server at http://localhost:8080/api (health: `/api/health`, docs: `/api/docs`). The API container is not published on its own port, so sign-in throttling can trust the client address nginx passes on.
 - Postgres: localhost:5432 (user `erp`, password `erp`, database `erp_dev`; local demo values)
 

@@ -4,12 +4,20 @@ A fresh session should be able to resume from this file alone.
 
 ## Status
 
-- **Current phase:** 2a (Authentication core), built on branch `phase-02a-auth-core`, awaiting approval. Phase 1a and 1b are merged (PRs #2, #3).
+- **Current phase:** 2b (Two-factor sign-in), built on branch `phase-02b-two-factor`, which is stacked on `phase-02a-auth-core` (2a approved but not merged yet; merge 2a first). Phase 1a and 1b are merged (PRs #2, #3).
 - Phase 2 is split: **2a** users, passwords, sessions/timeouts, lockout, sign-in/out, password change (this); **2b** two-factor (TOTP + recovery codes) for Admin/Director/Finance; **2c** user admin (create, deactivate leavers, reset password) and phone sign-in with secure storage.
-- **Next:** 2b. Do not start it without approval.
+- **Next:** 2c (user admin and phone sign-in). Do not start it without approval.
 - Phase 1 was split into 1a (web) and 1b (mobile) because it was too big for one PR.
 
 ## Done
+
+### Phase 2b: Two-factor sign-in (27-11-2026)
+
+- API: session stages (FULL / MFA_VERIFY / MFA_SETUP), half-signed-in sessions limited to the two-factor routes for 10 minutes, `MfaService` (setup, enable with 10 recovery codes, verify with app or recovery code, new codes, switch off for optional roles), TOTP per RFC 6238 with one-time use, encrypted secrets (AUTH_ENCRYPTION_KEY, demo key refused in production), wrong codes share the password lockout, every move to full sign-in opens a new session.
+- Web: code step, setup with QR code and key, recovery codes with copy/download and a "saved" confirmation, Account security page; `pendingStep()` orders two-factor before a forced password change.
+- Seeds: demo.admin has two-factor on with `DEMO_TOTP_SECRET`; demo.director and demo.finance show the setup step; one-click demo sign-in skips two-factor (A41).
+- Fresh-eyes security review: no direct bypass; 11 items, all fixed: password at sign-in reset the lockout while a code was due (unlimited guessing); setup secret reusable across sessions (planted secret); stolen session could enrol its own phone (password now required to enable from a signed-in session, disable, or make new codes); old full sessions of required roles skipped setup; temporary-password holder could enrol first (password change now comes before setup); setup race; GCM tag length, key separation (HKDF), demo-key byte comparison, no-store on auth answers, input length limits. Fixing #1 exposed a stuck-account case; now a lock always starts when tries run out.
+- Docker build: `.dockerignore` keeps `.claude`, `.vscode`, `apps/mobile`, `docs`, `e2e` out of the image (the `.claude` folder broke Docker Desktop's build).
 
 ### Phase 2a: Authentication core (26-11-2026)
 
@@ -71,6 +79,11 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Gotchas
 
+- New required setting `AUTH_ENCRYPTION_KEY` (32 bytes, base64); the demo value is in `.env.example`, Compose and CI. Seeds also need `DEMO_TOTP_SECRET`.
+- Routes a half-signed-in session may use need `@AllowDuringMfa()`.
+- E2E: demo.admin codes come from `DEMO_TOTP_SECRET`; each code works once, so `two-factor.spec.ts` runs serially and waits for a fresh 30-second step if needed. Password-sign-in E2E uses demo.hr (no two-factor).
+- Web tests: in `FakeAuth`, usernames containing `mfa-on` / `mfa-setup` pick the two-factor case; `FAKE_TOTP` is the accepted code.
+
 - Every API route is signed-in-only by default (global `AuthGuard`). Mark public routes with `@Public()`; routes a must-change-password user may use with `@AllowWhilePasswordChangeRequired()`.
 - In Docker the API is only reachable through nginx at http://localhost:8080/api (no port 3000 on the host). For local API work use `pnpm dev` (API on :3000).
 - Every non-GET request needs `x-erp-client: web|mobile` or the API answers 403 `CLIENT_HEADER_MISSING`. The web `apiFetch` adds it.
@@ -104,6 +117,8 @@ pnpm --filter @erp/api db:migrate  # create a migration after schema changes
 
 ## Decisions log
 
+- 28-11-2026: 2b review fixes: password change before two-factor setup (A47); password re-check for two-factor changes (A48). The user asked for lesser tasks (docs, test runs, routine reviews) to go to Sonnet sub-agents.
+- 27-11-2026: Phase 2b on top of unmerged 2a. Demo one-click sign-in skips two-factor (A41); wrong codes share the password lockout (A43).
 - 26-11-2026: Phase 2 split into 2a/2b/2c. Server-side sessions (A32), scrypt (A33), lockout and generic messages (A34). Q1 to be answered by the owner before Phase 5; Q2 deferred to the end.
 - 26-11-2026: Phase 1b built on top of the unmerged 1a branch. System font on mobile (A25), single current site on the phone (A26).
 - 26-11-2026: Phase 1 split into 1a (web) and 1b (mobile). TanStack Table v8 over v9 (A15). Demo mode build flag (A19). Q4 assumed: GitHub Actions is the gate, plus a full local run before each PR.
