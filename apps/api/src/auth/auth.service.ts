@@ -28,7 +28,13 @@ export interface RequestMeta {
 
 export interface Authenticated {
   user: User;
+  /** `stage` is the EFFECTIVE stage (see authenticate). */
   session: Session;
+  /**
+   * The password was typed for this session moments ago (a half-signed-in session, at most
+   * AUTH_MFA_PENDING_MINUTES old). Otherwise sensitive changes ask for it again.
+   */
+  freshFromPassword: boolean;
 }
 
 /** Same words for every sign-in failure, so the API never reveals which accounts exist. */
@@ -108,19 +114,23 @@ export class AuthService {
     // Checked after the password, so a leaver's account answers exactly like a wrong password.
     if (user.status !== 'ACTIVE') throw this.signInFailed();
 
+    const stage = this.stageAfterPassword(user);
     const passwordHash = needsRehash(user.passwordHash, this.env.PASSWORD_HASH_COST)
       ? await hashPassword(password, this.env.PASSWORD_HASH_COST)
       : undefined;
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        failedLoginCount: 0,
-        lockedUntil: null,
-        lastLoginAt: now,
+        // With a code still to come the reserved try stays counted: only a right code resets the
+        // counter. Otherwise someone with the password could sign in again after every few wrong
+        // codes and guess forever.
+        ...(stage === 'MFA_VERIFY'
+          ? {}
+          : { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now }),
         ...(passwordHash ? { passwordHash } : {}),
       },
     });
-    return this.openSession(updated, client, meta, this.stageAfterPassword(updated));
+    return this.openSession(updated, client, meta, { stage });
   }
 
   /**
@@ -147,7 +157,18 @@ export class AuthService {
          AND failed_login_count < ${this.env.AUTH_MAX_FAILED_LOGINS}
       RETURNING failed_login_count`;
     const row = rows[0];
-    return row ? { failedLoginCount: row.failed_login_count } : null;
+    if (row) return { failedLoginCount: row.failed_login_count };
+    // Refused. If the tries are used up but no lock is running (the last try was a right
+    // password with a code still due, or a process stopped mid-attempt), start the lock now, so
+    // the account unlocks after AUTH_LOCKOUT_MINUTES instead of staying stuck.
+    await this.prisma.$executeRaw`
+      UPDATE users
+         SET locked_until = ${new Date(now.getTime() + this.env.AUTH_LOCKOUT_MINUTES * MINUTE)},
+             failed_login_count = 0
+       WHERE id = ${userId}::uuid
+         AND failed_login_count >= ${this.env.AUTH_MAX_FAILED_LOGINS}
+         AND (locked_until IS NULL OR locked_until <= ${now})`;
+    return null;
   }
 
   /** A reserved attempt failed: lock the account when it used the last try. */
@@ -202,7 +223,7 @@ export class AuthService {
       where: { id: user.id },
       data: { lastLoginAt: this.clock.now() },
     });
-    return this.openSession(updated, client, meta);
+    return this.openSession(updated, client, meta, { viaDemo: true });
   }
 
   signInFailed() {
@@ -217,8 +238,8 @@ export class AuthService {
     user: User,
     kind: ClientKind,
     meta: RequestMeta,
-    stage: Session['stage'] = 'FULL',
-  ) {
+    { stage = 'FULL', viaDemo = false }: { stage?: Session['stage']; viaDemo?: boolean } = {},
+  ): Promise<Authenticated & { token: string }> {
     const token = newSessionToken();
     const client = kind === 'mobile' ? 'MOBILE' : 'WEB';
     const now = this.clock.now();
@@ -232,6 +253,7 @@ export class AuthService {
         userId: user.id,
         client,
         stage,
+        viaDemo,
         createdAt: now,
         lastSeenAt: now,
         expiresAt: new Date(now.getTime() + lifetime),
@@ -239,7 +261,7 @@ export class AuthService {
         ipAddress: meta.ipAddress?.slice(0, 64) ?? null,
       },
     });
-    return { user, session, token };
+    return { user, session, token, freshFromPassword: stage !== 'FULL' };
   }
 
   /**
@@ -287,6 +309,19 @@ export class AuthService {
       );
     }
 
+    const freshFromPassword = session.stage !== 'FULL';
+    // A role that must use two-factor but has not set it up is never fully signed in, even on a
+    // session opened before that rule existed, or before the role changed. (Demo sessions are
+    // the deliberate exception, A41.)
+    if (
+      session.stage === 'FULL' &&
+      !session.viaDemo &&
+      !user.totpEnabledAt &&
+      roleRequiresMfa(roleKeySchema.parse(user.roleKey))
+    ) {
+      session.stage = 'MFA_SETUP';
+    }
+
     if (now.getTime() - session.lastSeenAt.getTime() >= TOUCH_INTERVAL_MS) {
       await this.prisma.session.updateMany({
         where: { id: session.id, revokedAt: null },
@@ -294,7 +329,7 @@ export class AuthService {
       });
       session.lastSeenAt = now;
     }
-    return { user, session };
+    return { user, session, freshFromPassword };
   }
 
   unauthenticated() {
@@ -394,7 +429,11 @@ export class AuthService {
     // Every device signed in as this person (another browser, a lost phone, this one) is signed
     // out; this device continues on a brand-new session.
     await this.revokeAllSessions(user.id, 'password_changed');
-    return this.openSession(updated, session.client === 'MOBILE' ? 'mobile' : 'web', meta);
+    // A new starter changes the temporary password first, then sets up two-factor on the new
+    // session (so whoever issued the temporary password cannot enrol their own phone).
+    return this.openSession(updated, session.client === 'MOBILE' ? 'mobile' : 'web', meta, {
+      stage: session.stage === 'MFA_SETUP' ? 'MFA_SETUP' : 'FULL',
+    });
   }
 
   /** Sign out the session a token belongs to, if any (signing in over an old session). */

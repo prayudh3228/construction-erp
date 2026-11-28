@@ -21,9 +21,9 @@ test.describe('sign-in against the real API', () => {
     page,
     context,
   }) => {
-    await passwordSignIn(page, 'demo.finance');
+    await passwordSignIn(page, 'demo.hr');
     await expect(page).toHaveURL('/dashboard', SIGN_IN);
-    await expect(page.getByRole('button', { name: 'Account menu for Demo Finance' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Account menu for Demo HR' })).toBeVisible();
 
     const cookie = (await context.cookies()).find((c) => c.name === 'erp_session');
     expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'Lax', path: '/api' });

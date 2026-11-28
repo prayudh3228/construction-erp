@@ -138,7 +138,14 @@ export class FakeAuth implements AuthClient {
       'otpauth://totp/Construction%20ERP:test.user?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Construction+ERP',
   }));
 
-  mfaEnable = vi.fn(async (code: string) => {
+  mfaEnable = vi.fn(async (code: string, password?: string) => {
+    if (this.current?.session.stage === 'full' && password !== FAKE_PASSWORD) {
+      throw new ApiRequestError(
+        400,
+        'WRONG_CURRENT_PASSWORD',
+        'Enter your password to confirm this change.',
+      );
+    }
     this.checkCode(code);
     return { ...this.fullSession(true), recoveryCodes: FAKE_RECOVERY_CODES };
   });
@@ -153,13 +160,19 @@ export class FakeAuth implements AuthClient {
     return this.fullSession(true);
   });
 
-  mfaRegenerateCodes = vi.fn(async (code: string) => {
+  mfaRegenerateCodes = vi.fn(async (code: string, password: string) => {
+    if (password !== FAKE_PASSWORD) {
+      throw new ApiRequestError(400, 'WRONG_CURRENT_PASSWORD', 'Your password is not right.');
+    }
     this.checkCode(code);
     this.recoveryCodesLeft = 10;
     return FAKE_RECOVERY_CODES;
   });
 
-  mfaDisable = vi.fn(async (code: string) => {
+  mfaDisable = vi.fn(async (code: string, password: string) => {
+    if (password !== FAKE_PASSWORD) {
+      throw new ApiRequestError(400, 'WRONG_CURRENT_PASSWORD', 'Your password is not right.');
+    }
     if (this.current?.user.mfa.required) {
       throw new ApiRequestError(
         403,

@@ -30,33 +30,38 @@ export interface AuthClient {
   changePassword(currentPassword: string, newPassword: string): Promise<LoginResponse>;
   mfaStatus(): Promise<MfaStatus>;
   mfaSetup(): Promise<MfaSetupResponse>;
-  mfaEnable(code: string): Promise<MfaEnableResponse>;
+  /** `password` is needed when setting up from an ordinary signed-in session. */
+  mfaEnable(code: string, password?: string): Promise<MfaEnableResponse>;
   mfaVerify(input: { code: string } | { recoveryCode: string }): Promise<LoginResponse>;
-  mfaRegenerateCodes(code: string): Promise<string[]>;
-  mfaDisable(code: string): Promise<MeResponse>;
+  mfaRegenerateCodes(code: string, password: string): Promise<string[]>;
+  mfaDisable(code: string, password: string): Promise<MeResponse>;
 }
 
 export const httpAuthClient: AuthClient = {
   mfaStatus: () => apiFetch('/auth/mfa', { schema: mfaStatusSchema }),
   mfaSetup: () => apiFetch('/auth/mfa/setup', { method: 'POST', schema: mfaSetupResponseSchema }),
-  mfaEnable: (code) =>
+  mfaEnable: (code, password) =>
     apiFetch('/auth/mfa/enable', {
       method: 'POST',
-      body: { code },
+      body: password ? { code, password } : { code },
       schema: mfaEnableResponseSchema,
     }),
   mfaVerify: (input) =>
     apiFetch('/auth/mfa/verify', { method: 'POST', body: input, schema: loginResponseSchema }),
-  mfaRegenerateCodes: async (code) =>
+  mfaRegenerateCodes: async (code, password) =>
     (
       await apiFetch('/auth/mfa/recovery-codes', {
         method: 'POST',
-        body: { code },
+        body: { code, password },
         schema: recoveryCodesResponseSchema,
       })
     ).recoveryCodes,
-  mfaDisable: (code) =>
-    apiFetch('/auth/mfa/disable', { method: 'POST', body: { code }, schema: meResponseSchema }),
+  mfaDisable: (code, password) =>
+    apiFetch('/auth/mfa/disable', {
+      method: 'POST',
+      body: { code, password },
+      schema: meResponseSchema,
+    }),
   async me() {
     try {
       return await apiFetch('/auth/me', { schema: meResponseSchema });
@@ -150,12 +155,14 @@ export function isSignedOutError(e: unknown): boolean {
 export type SignInStep = '/two-factor' | '/two-factor/setup' | '/change-password';
 
 /**
- * What a signed-in browser must do before it may use the app, in order: finish two-factor
- * (enter a code, or set it up), then change the password if required. Null: nothing, go ahead.
+ * What a signed-in browser must do before it may use the app, in order: enter the two-factor
+ * code (if it is on), change a temporary password, then set up two-factor (if the role needs
+ * it). The password comes before setup so whoever issued a temporary password cannot enrol
+ * their own phone. Null: nothing, go ahead.
  */
 export function pendingStep(me: MeResponse): SignInStep | null {
   if (me.session.stage === 'mfa_verify') return '/two-factor';
-  if (me.session.stage === 'mfa_setup') return '/two-factor/setup';
   if (me.user.mustChangePassword) return '/change-password';
+  if (me.session.stage === 'mfa_setup') return '/two-factor/setup';
   return null;
 }

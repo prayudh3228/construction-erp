@@ -37,9 +37,17 @@ export class AuthGuard implements CanActivate {
     const authenticated = await this.auth.authenticate(tokenFromRequest(req));
     req.auth = authenticated;
 
-    // Half signed in: only the two-factor steps until they are done.
+    // Half signed in: only the two-factor steps until they are done. A new starter in a role
+    // that needs two-factor changes the temporary password first, so that is allowed too.
     if (authenticated.session.stage !== 'FULL') {
       if (this.reflector.getAllAndOverride<boolean>(ALLOW_DURING_MFA, targets)) return true;
+      if (
+        authenticated.session.stage === 'MFA_SETUP' &&
+        authenticated.user.mustChangePassword &&
+        this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, targets)
+      ) {
+        return true;
+      }
       throw apiError(
         HttpStatus.FORBIDDEN,
         AUTH_ERROR_CODES.mfaRequired,

@@ -127,16 +127,37 @@ describe('setting up', () => {
     expect(secret).toMatch(/^[A-Z2-7]{32}$/);
     expect(uri).toContain(`secret=${secret}`);
     expect(uri).toContain(encodeURIComponent(user.username));
+    // Kept encrypted on the session until confirmed; nothing on the user yet.
     const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    expect(row.totpSecret).toMatch(/^v1:/);
-    expect(row.totpSecret).not.toContain(secret);
+    expect(row.totpSecret).toBeNull();
     expect(row.totpEnabledAt).toBeNull();
+    const session = await prisma.session.findFirstOrThrow({
+      where: { userId: user.id, revokedAt: null },
+    });
+    expect(session.totpPendingSecret).toMatch(/^v1:/);
+    expect(session.totpPendingSecret).not.toContain(secret);
   });
 
-  it('asking again while setup is pending gives the same secret (page opened twice, double click)', async () => {
+  it('the same session asking again gets the same secret, even in parallel (double click)', async () => {
     const { cookie, secret } = await pendingSetup();
-    const again = await post('/mfa/setup', cookie).expect(200);
-    expect(again.body.secret).toBe(secret);
+    const again = await Promise.all([post('/mfa/setup', cookie), post('/mfa/setup', cookie)]);
+    expect(again.map((r) => r.body.secret)).toEqual([secret, secret]);
+  });
+
+  it('another session never gets the same secret, so a secret seen by someone else is useless', async () => {
+    // Someone with the password opens setup and notes the secret, then leaves.
+    const user = await makeUser({ role: 'finance' });
+    const attacker = cookieOf(await login(user.username));
+    const seen = (await post('/mfa/setup', attacker).expect(200)).body.secret as string;
+    // The real user later sets it up from their own session.
+    const owner = cookieOf(await login(user.username));
+    const theirs = (await post('/mfa/setup', owner).expect(200)).body.secret as string;
+    expect(theirs).not.toBe(seen);
+    await post('/mfa/enable', owner, { code: codeNow(theirs) }).expect(200);
+    // The noted secret's codes do not work.
+    const next = cookieOf(await login(user.username));
+    clock.advance(30_000);
+    await post('/mfa/verify', next, { code: codeNow(seen) }).expect(400);
   });
 
   it('a wrong code does not switch it on', async () => {
@@ -238,10 +259,38 @@ describe('the second step of sign-in', () => {
     expect(status.body).toEqual({ enabled: true, required: false, recoveryCodesLeft: 0 });
   });
 
+  it('signing in again does not reset the count: someone with the password cannot keep guessing codes', async () => {
+    const user = await makeUser({ mfa: true });
+    // Each round: the right password (1 try) and a wrong code (1 try). Nothing resets in between.
+    const r1 = cookieOf(await login(user.username).expect(200));
+    await post('/mfa/verify', r1, { code: '000000' }).expect(400);
+    const r2 = cookieOf(await login(user.username).expect(200));
+    await post('/mfa/verify', r2, { code: '000000' }).expect(400);
+    const r3 = cookieOf(await login(user.username).expect(200));
+    // 5th try in a row: the account locks.
+    await post('/mfa/verify', r3, { code: '000000' }).expect(401);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.lockedUntil).not.toBeNull();
+    await login(user.username).expect(401);
+    // And it unlocks after 15 minutes, not never.
+    clock.advance(15 * MINUTE + 1);
+    const again = cookieOf(await login(user.username).expect(200));
+    await post('/mfa/verify', again, { code: codeNow() }).expect(200);
+  });
+
+  it('a right code resets the count', async () => {
+    const user = await makeUser({ mfa: true });
+    await post('/mfa/verify', cookieOf(await login(user.username)), { code: codeNow() }).expect(
+      200,
+    );
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.failedLoginCount).toBe(0);
+  });
+
   it('wrong codes count towards the lockout; at the limit the account locks and the session ends', async () => {
     const user = await makeUser({ mfa: true });
-    const cookie = cookieOf(await login(user.username)); // 1 reserved try, reset on success
-    for (let i = 0; i < 4; i++) await post('/mfa/verify', cookie, { code: '000000' }).expect(400);
+    const cookie = cookieOf(await login(user.username)); // the password used 1 try
+    for (let i = 0; i < 3; i++) await post('/mfa/verify', cookie, { code: '000000' }).expect(400);
     await post('/mfa/verify', cookie, { code: '000000' }).expect(401);
     await http().get('/api/auth/me').set('Cookie', cookie).expect(401);
     const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -279,13 +328,22 @@ describe('managing two-factor when signed in', () => {
     return { user, cookie: cookieOf(res) };
   }
 
-  it('new recovery codes need an app code, and the old ones stop working', async () => {
+  it('new recovery codes need the password and an app code, and the old ones stop working', async () => {
     const { user, cookie } = await fullySignedIn();
     await prisma.recoveryCode.create({
       data: { userId: user.id, codeHash: box.hash('ABCDE-FGHJK') },
     });
-    await post('/mfa/recovery-codes', cookie, { code: '000000' }).expect(400);
-    const res = await post('/mfa/recovery-codes', cookie, { code: codeNow() }).expect(200);
+    await post('/mfa/recovery-codes', cookie, { code: codeNow() }).expect(400); // no password
+    const wrongPw = await post('/mfa/recovery-codes', cookie, {
+      code: codeNow(),
+      password: 'nope',
+    });
+    expect(wrongPw.body.code).toBe('WRONG_CURRENT_PASSWORD');
+    await post('/mfa/recovery-codes', cookie, { code: '000000', password: PASSWORD }).expect(400);
+    const res = await post('/mfa/recovery-codes', cookie, {
+      code: codeNow(),
+      password: PASSWORD,
+    }).expect(200);
     expect(res.body.recoveryCodes).toHaveLength(10);
     const old = await prisma.recoveryCode.count({
       where: { userId: user.id, codeHash: box.hash('ABCDE-FGHJK') },
@@ -295,24 +353,74 @@ describe('managing two-factor when signed in', () => {
 
   it('a role that must use it cannot switch it off', async () => {
     const { cookie } = await fullySignedIn('finance');
-    const res = await post('/mfa/disable', cookie, { code: codeNow() }).expect(403);
+    const res = await post('/mfa/disable', cookie, { code: codeNow(), password: PASSWORD }).expect(
+      403,
+    );
     expect(res.body.code).toBe('MFA_CANNOT_DISABLE');
   });
 
-  it('other roles can switch it off with a code; the next sign-in needs no code', async () => {
+  it('other roles can switch it off with the password and a code; the next sign-in needs no code', async () => {
     const { user, cookie } = await fullySignedIn('site');
-    const res = await post('/mfa/disable', cookie, { code: codeNow() }).expect(200);
+    await post('/mfa/disable', cookie, { code: codeNow() }).expect(400); // no password
+    const res = await post('/mfa/disable', cookie, { code: codeNow(), password: PASSWORD }).expect(
+      200,
+    );
     expect(res.body.user.mfa.enabled).toBe(false);
     expect((await login(user.username)).body.session.stage).toBe('full');
   });
 
-  it('a user without it can switch it on from a full session', async () => {
+  it('switching it on from an ordinary signed-in session needs the password (a stolen session cannot enrol a phone)', async () => {
     const user = await makeUser({ role: 'site' });
     const cookie = cookieOf(await login(user.username));
     const setup = await post('/mfa/setup', cookie).expect(200);
-    const res = await post('/mfa/enable', cookie, { code: codeNow(setup.body.secret) }).expect(200);
+    const noPw = await post('/mfa/enable', cookie, { code: codeNow(setup.body.secret) }).expect(
+      400,
+    );
+    expect(noPw.body.code).toBe('WRONG_CURRENT_PASSWORD');
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).totpEnabledAt,
+    ).toBeNull();
+    clock.advance(30_000);
+    const res = await post('/mfa/enable', cookie, {
+      code: codeNow(setup.body.secret),
+      password: PASSWORD,
+    }).expect(200);
     expect(res.body.user.mfa.enabled).toBe(true);
     expect((await login(user.username)).body.session.stage).toBe('mfa_verify');
+  });
+});
+
+describe('required roles and new starters', () => {
+  it('a full session of a required role without two-factor (from before the rule) must set it up', async () => {
+    const user = await makeUser({ role: 'finance' });
+    // As if this session was opened fully signed in before two-factor existed.
+    const res = await login(user.username);
+    await prisma.session.updateMany({ where: { userId: user.id }, data: { stage: 'FULL' } });
+    const cookie = cookieOf(res);
+    const me = await http().get('/api/auth/me').set('Cookie', cookie).expect(200);
+    expect(me.body.session.stage).toBe('mfa_setup');
+    await http().get('/api/auth/sessions').set('Cookie', cookie).expect(403);
+    // And it did not just type the password, so enabling asks for it.
+    const setup = await post('/mfa/setup', cookie).expect(200);
+    await post('/mfa/enable', cookie, { code: codeNow(setup.body.secret) }).expect(400);
+  });
+
+  it('a new starter in a required role changes the temporary password first, then sets up two-factor', async () => {
+    const user = await makeUser({ role: 'director' });
+    await prisma.user.update({ where: { id: user.id }, data: { mustChangePassword: true } });
+    const cookie = cookieOf(await login(user.username));
+    // Setup is refused until the temporary password is changed.
+    const early = await post('/mfa/setup', cookie).expect(403);
+    expect(early.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    const changed = await post('/change-password', cookie, {
+      currentPassword: PASSWORD,
+      newPassword: 'brand new lantern 58',
+    }).expect(200);
+    expect(changed.body.session.stage).toBe('mfa_setup');
+    const fresh = cookieOf(changed);
+    const setup = await post('/mfa/setup', fresh).expect(200);
+    // Just typed the password: no need to type it again.
+    await post('/mfa/enable', fresh, { code: codeNow(setup.body.secret) }).expect(200);
   });
 });
 
@@ -338,6 +446,10 @@ describe('demo sign-in', () => {
         .send({ username: 'demo.director' })
         .expect(200);
       expect(res.body.session.stage).toBe('full');
+      // Still full on the next request: demo sessions are the deliberate exception.
+      const cookie = cookieOf(res);
+      const me = await request(demoApp.getHttpServer()).get('/api/auth/me').set('Cookie', cookie);
+      expect(me.body.session.stage).toBe('full');
     } finally {
       if (!existed) await demoPrisma.user.delete({ where: { username: 'demo.director' } });
       await demoApp.close();

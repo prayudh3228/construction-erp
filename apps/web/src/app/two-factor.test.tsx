@@ -116,7 +116,7 @@ describe('setting up (required roles)', () => {
     await screen.findByRole('heading', { level: 1, name: 'Management dashboard' });
   });
 
-  it('a new starter in a required role sets up two-factor first, then changes the password', async () => {
+  it('a new starter in a required role changes the temporary password first, then sets up two-factor', async () => {
     const { user } = renderApp('/login');
     fakeAuth.login.mockImplementationOnce(async () => {
       fakeAuth.current = fakeMe(
@@ -126,14 +126,20 @@ describe('setting up (required roles)', () => {
       return fakeAuth.current;
     });
     await passwordSignIn(user, 'new.starter');
+    // The setup page cannot be reached yet: the password change comes first.
+    await screen.findByRole('heading', { name: 'Choose a new password' });
+    await user.type(screen.getByLabelText(/Current password/), FAKE_PASSWORD);
+    await user.type(screen.getByLabelText(/^New password/), 'brand new lantern 58');
+    await user.type(screen.getByLabelText(/Repeat new password/), 'brand new lantern 58');
+    await user.click(screen.getByRole('button', { name: 'Change password' }));
     await screen.findByRole('heading', { name: 'Set up two-factor sign-in' });
+    // Just typed the password: no password field here.
+    expect(screen.queryByLabelText(/Your password/)).not.toBeInTheDocument();
     await user.type(await screen.findByLabelText(/6-digit code/), FAKE_TOTP);
     await user.click(screen.getByRole('button', { name: 'Turn on two-factor sign-in' }));
     await user.click(await screen.findByLabelText('I have saved my recovery codes'));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(
-      await screen.findByRole('heading', { name: 'Choose a new password' }),
-    ).toBeInTheDocument();
+    await screen.findByRole('heading', { level: 1, name: 'Management dashboard' });
   });
 
   it('a required role can only sign out from setup, not skip it', async () => {
@@ -167,6 +173,8 @@ describe('account security page', () => {
     expect(await screen.findByText('Off')).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: 'Turn on two-factor sign-in' }));
     await screen.findByRole('heading', { name: 'Set up two-factor sign-in' });
+    // From an ordinary signed-in session the password is asked again.
+    expect(await screen.findByLabelText(/Your password/)).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/account/security'));
   });
@@ -178,10 +186,11 @@ describe('account security page', () => {
     expect(screen.getByText(/Recovery codes left/)).toHaveTextContent('10');
     await user.click(screen.getByRole('button', { name: 'Make new recovery codes' }));
     const dialog = await screen.findByRole('dialog', { name: 'Make new recovery codes?' });
+    await user.type(within(dialog).getByLabelText(/Your password/), FAKE_PASSWORD);
     await user.type(within(dialog).getByLabelText(/6-digit code/), FAKE_TOTP);
     await user.click(within(dialog).getByRole('button', { name: 'Make new codes' }));
     expect(await screen.findByRole('list', { name: 'Recovery codes' })).toBeInTheDocument();
-    expect(fakeAuth.mfaRegenerateCodes).toHaveBeenCalledWith(FAKE_TOTP);
+    expect(fakeAuth.mfaRegenerateCodes).toHaveBeenCalledWith(FAKE_TOTP, FAKE_PASSWORD);
   });
 
   it('an optional role can turn it off with a code', async () => {
@@ -189,6 +198,7 @@ describe('account security page', () => {
     const { user } = renderApp('/account/security');
     await user.click(await screen.findByRole('button', { name: 'Turn off' }));
     const dialog = await screen.findByRole('dialog', { name: 'Turn off two-factor sign-in?' });
+    await user.type(within(dialog).getByLabelText(/Your password/), FAKE_PASSWORD);
     await user.type(within(dialog).getByLabelText(/6-digit code/), FAKE_TOTP);
     await user.click(within(dialog).getByRole('button', { name: 'Turn off' }));
     expect(await screen.findByText('Off')).toBeInTheDocument();
@@ -210,5 +220,29 @@ describe('account security page', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Account security' }),
     ).toBeInTheDocument();
+  });
+});
+
+describe('confirming with the password', () => {
+  it('switching two-factor on from an ordinary session sends the password with the code', async () => {
+    signIn(undefined, 'Asha Rao');
+    const { user } = renderApp('/two-factor/setup');
+    await user.type(await screen.findByLabelText(/Your password/), FAKE_PASSWORD);
+    await user.type(screen.getByLabelText(/6-digit code/), FAKE_TOTP);
+    await user.click(screen.getByRole('button', { name: 'Turn on two-factor sign-in' }));
+    expect(await screen.findByRole('list', { name: 'Recovery codes' })).toBeInTheDocument();
+    expect(fakeAuth.mfaEnable).toHaveBeenCalledWith(FAKE_TOTP, FAKE_PASSWORD);
+  });
+
+  it('a wrong password in the account dialog is shown and nothing changes', async () => {
+    signIn(undefined, 'Asha Rao', { mfa: { enabled: true, required: false } });
+    const { user } = renderApp('/account/security');
+    await user.click(await screen.findByRole('button', { name: 'Turn off' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Turn off two-factor sign-in?' });
+    await user.type(within(dialog).getByLabelText(/Your password/), 'not it');
+    await user.type(within(dialog).getByLabelText(/6-digit code/), FAKE_TOTP);
+    await user.click(within(dialog).getByRole('button', { name: 'Turn off' }));
+    expect(await within(dialog).findByText('Your password is not right.')).toBeInTheDocument();
+    expect(fakeAuth.current?.user.mfa.enabled).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { type INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { type NestExpressApplication } from '@nestjs/platform-express';
+import { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { clientHeaderMiddleware } from './auth/client-header.middleware';
 import { ENV } from './config/config.module';
@@ -17,6 +18,11 @@ export function configureApp(app: INestApplication): void {
   app.use(helmet());
   app.use(cookieParser());
   app.use(clientHeaderMiddleware);
+  // Sign-in answers can carry tokens, authenticator secrets and recovery codes: never cache them.
+  app.use(`/${API_PREFIX}/auth`, (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.enableCors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true });
   app.enableShutdownHooks();
 }

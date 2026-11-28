@@ -108,6 +108,7 @@ const twoFactorSetupRoute = createRoute({
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me) throw redirect({ to: '/login', search: { redirect: search.redirect } });
     if (me.session.stage === 'mfa_verify') throw redirect({ to: '/two-factor', search });
+    if (me.user.mustChangePassword) throw redirect({ to: '/change-password' });
     if (me.session.stage === 'full' && me.user.mfa.enabled) {
       throw redirect({ href: safeRedirectPath(search.redirect) });
     }
@@ -122,9 +123,8 @@ const changePasswordRoute = createRoute({
   beforeLoad: async ({ context, location }) => {
     const me = await context.queryClient.ensureQueryData(meQuery);
     if (!me) throw redirect({ to: '/login', search: { redirect: location.href } });
-    const step = pendingStep(me);
-    // Two-factor comes before changing the password.
-    if (step && step !== '/change-password') throw redirect({ to: step });
+    // Entering a two-factor code comes before changing the password.
+    if (me.session.stage === 'mfa_verify') throw redirect({ to: '/two-factor' });
   },
   component: ChangePasswordPage,
 });

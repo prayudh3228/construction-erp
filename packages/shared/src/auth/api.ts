@@ -78,8 +78,8 @@ export type LoginResponse = z.infer<typeof loginResponseSchema>;
 
 /** POST /api/auth/mfa/verify: an authenticator code, or one recovery code. */
 export const mfaVerifyRequestSchema = z.union([
-  z.object({ code: z.string().trim().min(1, 'Enter the 6-digit code.') }).strict(),
-  z.object({ recoveryCode: z.string().trim().min(1, 'Enter a recovery code.') }).strict(),
+  z.object({ code: z.string().trim().min(1, 'Enter the 6-digit code.').max(20) }).strict(),
+  z.object({ recoveryCode: z.string().trim().min(1, 'Enter a recovery code.').max(40) }).strict(),
 ]);
 export type MfaVerifyRequest = z.infer<typeof mfaVerifyRequestSchema>;
 
@@ -90,9 +90,26 @@ export const mfaSetupResponseSchema = z.object({
 });
 export type MfaSetupResponse = z.infer<typeof mfaSetupResponseSchema>;
 
-/** A code from the authenticator app, to confirm setup or protect a change. */
+/**
+ * A code from the authenticator app to confirm setup. `password` is needed when setting up from
+ * an already signed-in session (not straight after entering it at sign-in).
+ */
 export const mfaCodeRequestSchema = z.object({
-  code: z.string().trim().min(1, 'Enter the 6-digit code.'),
+  code: z.string().trim().min(1, 'Enter the 6-digit code.').max(20),
+  password: z
+    .string()
+    .min(1)
+    .max(PASSWORD_MAX_LENGTH * 4)
+    .optional(),
+});
+
+/** Changing two-factor (new recovery codes, switching off) needs the password and an app code. */
+export const mfaConfirmRequestSchema = z.object({
+  code: z.string().trim().min(1, 'Enter the 6-digit code.').max(20),
+  password: z
+    .string()
+    .min(1, 'Enter your password.')
+    .max(PASSWORD_MAX_LENGTH * 4),
 });
 
 /** Shown once, right after they are made. Only hashes are stored. */

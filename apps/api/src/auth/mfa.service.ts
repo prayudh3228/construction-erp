@@ -55,55 +55,50 @@ export class MfaService {
   }
 
   /**
-   * Start setting up: a secret (stored encrypted, not active until confirmed) for the app to scan.
-   * Allowed while half-signed-in for setup, or when fully signed in with two-factor off.
+   * Start setting up: a new secret for the app to scan, kept (encrypted) on THIS session until
+   * it is confirmed. Asking again from the same session returns the same secret (page opened
+   * twice, double click); any other session gets a different one, so a secret seen by someone
+   * else can never be the one the real user confirms. A new starter changes the temporary
+   * password first.
    */
-  async startSetup({ user, session }: Authenticated): Promise<MfaSetupResponse> {
-    if (session.stage === 'MFA_VERIFY' || user.totpEnabledAt) {
-      throw apiError(
-        HttpStatus.CONFLICT,
-        'MFA_ALREADY_ENABLED',
-        'Two-factor sign-in is already on for this account.',
-      );
-    }
-    // While a setup is pending (secret made, not yet confirmed) hand out the same secret, so a
-    // page opened twice or a double click never leaves the app and the server disagreeing.
-    let secret = user.totpSecret ? this.box.decrypt(user.totpSecret) : null;
-    if (!secret) {
-      secret = newTotpSecret();
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { totpSecret: this.box.encrypt(secret), totpLastStep: null },
-      });
-    }
+  async startSetup(auth: Authenticated): Promise<MfaSetupResponse> {
+    const { user, session } = auth;
+    this.assertCanSetUp(auth);
+    // Only the first call on this session stores a secret; parallel calls then read it back.
+    await this.prisma.session.updateMany({
+      where: { id: session.id, totpPendingSecret: null },
+      data: { totpPendingSecret: this.box.encrypt(newTotpSecret()) },
+    });
+    const secret = await this.pendingSecret(session.id);
     return {
-      secret,
-      otpauthUri: otpauthUri(secret, user.username, defaultBranding.productName),
+      secret: secret!,
+      otpauthUri: otpauthUri(secret!, user.username, defaultBranding.productName),
     };
   }
 
-  /** Finish setup with a code from the app. Two-factor is on; returns the recovery codes once. */
+  /**
+   * Finish setup with a code from the app. Two-factor is on; returns the recovery codes once.
+   * From a session that did not just type the password (an ordinary signed-in session), the
+   * password is asked again, so a stolen session cannot enrol the thief's phone.
+   */
   async enable(
     auth: Authenticated,
     code: string,
+    password: string | undefined,
     meta: RequestMeta,
   ): Promise<Opened & { recoveryCodes: string[] }> {
     const { user, session } = auth;
-    if (session.stage === 'MFA_VERIFY' || user.totpEnabledAt) {
-      throw apiError(
-        HttpStatus.CONFLICT,
-        'MFA_ALREADY_ENABLED',
-        'Two-factor sign-in is already on.',
-      );
-    }
-    if (!user.totpSecret) {
+    this.assertCanSetUp(auth);
+    const secret = await this.pendingSecret(session.id);
+    if (!secret) {
       throw apiError(
         HttpStatus.BAD_REQUEST,
         AUTH_ERROR_CODES.mfaSetupNotStarted,
         'Start the setup first, then enter the code from your app.',
       );
     }
-    const step = await this.checkTotp(auth, this.box.decrypt(user.totpSecret), code);
+    if (!auth.freshFromPassword) await this.confirmPassword(auth, password);
+    const step = await this.checkTotp(auth, secret, code);
     const now = this.clock.now();
     const recoveryCodes = newRecoveryCodes();
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -113,13 +108,45 @@ export class MfaService {
       });
       return tx.user.update({
         where: { id: user.id },
-        data: { totpEnabledAt: now, totpLastStep: step, failedLoginCount: 0 },
+        data: {
+          totpSecret: this.box.encrypt(secret),
+          totpEnabledAt: now,
+          totpLastStep: step,
+          failedLoginCount: 0,
+          lastLoginAt: now,
+        },
       });
     });
     // Other sessions were opened without two-factor: end them all, continue on a new one.
     await this.auth.revokeAllSessions(user.id, 'mfa_enabled');
-    const opened = await this.auth.openSession(updated, clientOf(session), meta, 'FULL');
+    const opened = await this.auth.openSession(updated, clientOf(session), meta);
     return { ...opened, recoveryCodes };
+  }
+
+  private assertCanSetUp({ user, session }: Authenticated): void {
+    if (session.stage === 'MFA_VERIFY' || user.totpEnabledAt) {
+      throw apiError(
+        HttpStatus.CONFLICT,
+        'MFA_ALREADY_ENABLED',
+        'Two-factor sign-in is already on for this account.',
+      );
+    }
+    if (user.mustChangePassword) {
+      throw apiError(
+        HttpStatus.FORBIDDEN,
+        AUTH_ERROR_CODES.passwordChangeRequired,
+        'Please change your password first, then set up two-factor sign-in.',
+      );
+    }
+  }
+
+  /** The secret being set up on this session, read fresh from the database (never a snapshot). */
+  private async pendingSecret(sessionId: string): Promise<string | null> {
+    const row = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { totpPendingSecret: true },
+    });
+    return row?.totpPendingSecret ? this.box.decrypt(row.totpPendingSecret) : null;
   }
 
   /** Second step of sign-in: an authenticator code or one recovery code. */
@@ -151,15 +178,20 @@ export class MfaService {
       });
     }
     await this.auth.logout(session.id);
-    return this.auth.openSession(updated, clientOf(session), meta, 'FULL');
+    return this.auth.openSession(updated, clientOf(session), meta);
   }
 
-  /** New set of recovery codes (the old ones stop working). Needs a current app code. */
-  async regenerateRecoveryCodes(auth: Authenticated, code: string): Promise<string[]> {
+  /** New set of recovery codes (the old ones stop working). Needs the password and an app code. */
+  async regenerateRecoveryCodes(
+    auth: Authenticated,
+    code: string,
+    password: string,
+  ): Promise<string[]> {
     const { user } = auth;
     if (!user.totpEnabledAt || !user.totpSecret) {
       throw apiError(HttpStatus.CONFLICT, 'MFA_NOT_ENABLED', 'Two-factor sign-in is not on.');
     }
+    await this.confirmPassword(auth, password);
     const step = await this.checkTotp(auth, this.box.decrypt(user.totpSecret), code);
     const recoveryCodes = newRecoveryCodes();
     await this.prisma.$transaction(async (tx) => {
@@ -175,8 +207,8 @@ export class MfaService {
     return recoveryCodes;
   }
 
-  /** Switch two-factor off. Not possible for roles that must use it. Needs a current app code. */
-  async disable(auth: Authenticated, code: string): Promise<User> {
+  /** Switch two-factor off. Not for roles that must use it. Needs the password and an app code. */
+  async disable(auth: Authenticated, code: string, password: string): Promise<User> {
     const { user } = auth;
     if (this.required(user)) {
       throw apiError(
@@ -188,6 +220,7 @@ export class MfaService {
     if (!user.totpEnabledAt || !user.totpSecret) {
       throw apiError(HttpStatus.CONFLICT, 'MFA_NOT_ENABLED', 'Two-factor sign-in is not on.');
     }
+    await this.confirmPassword(auth, password);
     await this.checkTotp(auth, this.box.decrypt(user.totpSecret), code);
     return this.prisma.$transaction(async (tx) => {
       await tx.recoveryCode.deleteMany({ where: { userId: user.id } });
@@ -196,6 +229,29 @@ export class MfaService {
         data: { totpSecret: null, totpEnabledAt: null, totpLastStep: null, failedLoginCount: 0 },
       });
     });
+  }
+
+  /**
+   * Ask for the password again before a sensitive change. Counts on the shared attempt counter:
+   * wrong is 400, and when that was the last try the account locks and every session ends.
+   */
+  private async confirmPassword(auth: Authenticated, password: string | undefined): Promise<void> {
+    const now = this.clock.now();
+    const reserved = await this.auth.reserveAttempt(auth.user.id, now);
+    if (!reserved) {
+      await this.auth.revokeAllSessions(auth.user.id, 'too_many_attempts');
+      throw this.auth.unauthenticated();
+    }
+    if (password && (await this.auth.verifyGated(password, auth.user.passwordHash))) return;
+    if (await this.auth.afterFailure(auth.user.id, reserved.failedLoginCount, now)) {
+      await this.auth.revokeAllSessions(auth.user.id, 'too_many_attempts');
+      throw this.auth.unauthenticated();
+    }
+    throw apiError(
+      HttpStatus.BAD_REQUEST,
+      AUTH_ERROR_CODES.wrongCurrentPassword,
+      password ? 'Your password is not right.' : 'Enter your password to confirm this change.',
+    );
   }
 
   /**

@@ -34,6 +34,7 @@ export function AccountSecurityPage() {
   const status = useQuery({ queryKey: statusKey, queryFn: () => authClient().mfaStatus() });
   const [action, setAction] = useState<Action | null>(null);
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newCodes, setNewCodes] = useState<string[] | null>(null);
@@ -43,11 +44,16 @@ export function AccountSecurityPage() {
   const close = () => {
     setAction(null);
     setCode('');
+    setPassword('');
     setError(null);
   };
 
   const confirm = async (e: FormEvent) => {
     e.preventDefault();
+    if (!password) {
+      setError('Enter your password to confirm.');
+      return;
+    }
     if (!/^\d{6}$/.test(code.replace(/\s/g, ''))) {
       setError('Enter the 6-digit code your app shows now.');
       return;
@@ -56,9 +62,9 @@ export function AccountSecurityPage() {
     setError(null);
     try {
       if (action === 'regenerate') {
-        setNewCodes(await authClient().mfaRegenerateCodes(code));
+        setNewCodes(await authClient().mfaRegenerateCodes(code, password));
       } else {
-        const me = await authClient().mfaDisable(code);
+        const me = await authClient().mfaDisable(code, password);
         queryClient.setQueryData(meQueryKey, me);
         toast.success('Two-factor sign-in is off.');
       }
@@ -169,10 +175,18 @@ export function AccountSecurityPage() {
           </DialogTitle>
           <DialogDescription>
             {action === 'regenerate'
-              ? 'Your old recovery codes will stop working. Enter the code from your app to continue.'
-              : 'Signing in will need only your password. Enter the code from your app to confirm.'}
+              ? 'Your old recovery codes will stop working. Enter your password and the code from your app to continue.'
+              : 'Signing in will need only your password. Enter your password and the code from your app to confirm.'}
           </DialogDescription>
           <form noValidate onSubmit={(e) => void confirm(e)} className="space-y-4">
+            <FormField label="Your password" required>
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </FormField>
             <FormField label="6-digit code" error={error ?? undefined} required>
               <Input
                 inputMode="numeric"

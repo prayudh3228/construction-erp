@@ -80,7 +80,13 @@ export const envSchema = z
         message: 'Demo sign-in must never be enabled in production',
       });
     }
-    if (env.NODE_ENV === 'production' && env.AUTH_ENCRYPTION_KEY === DEMO_ENCRYPTION_KEY) {
+    if (
+      env.NODE_ENV === 'production' &&
+      // Compare the key bytes, not the text: padding or spaces must not sneak the demo key in.
+      Buffer.from(env.AUTH_ENCRYPTION_KEY, 'base64').equals(
+        Buffer.from(DEMO_ENCRYPTION_KEY, 'base64'),
+      )
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['AUTH_ENCRYPTION_KEY'],

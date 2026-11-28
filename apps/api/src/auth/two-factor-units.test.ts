@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadEnv } from '../config/env';
+import { DEMO_ENCRYPTION_KEY, loadEnv } from '../config/env';
 import { SecretBox, newRecoveryCodes, normaliseRecoveryCode } from './secret-box';
 import {
   base32Decode,
@@ -100,6 +100,13 @@ describe('SecretBox', () => {
     expect(() => box.decrypt('plain')).toThrow();
   });
 
+  it('refuses a stored value cut short (a shortened authentication tag)', () => {
+    const box = new SecretBox(key);
+    const raw = Buffer.from(box.encrypt('secret').slice(3), 'base64');
+    // IV (12) + only 8 bytes of tag: must not be accepted as a weaker check.
+    expect(() => box.decrypt(`v1:${raw.subarray(0, 20).toString('base64')}`)).toThrow();
+  });
+
   it('needs exactly 32 bytes of key', () => {
     expect(() => new SecretBox(Buffer.alloc(16).toString('base64'))).toThrow(/32 bytes/);
   });
@@ -128,6 +135,12 @@ describe('recovery codes', () => {
 });
 
 describe('encryption key setting', () => {
+  it('refuses the demo key in production even written differently (no padding, spaces)', () => {
+    const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db', NODE_ENV: 'production' };
+    const unpadded = DEMO_ENCRYPTION_KEY.replace(/=+$/, '');
+    expect(() => loadEnv({ ...base, AUTH_ENCRYPTION_KEY: unpadded })).toThrow(/demo key/);
+  });
+
   it('is required and must be 32 bytes', () => {
     const base = { DATABASE_URL: 'postgresql://u:p@localhost:5432/db' };
     expect(() => loadEnv(base)).toThrow(/AUTH_ENCRYPTION_KEY/);

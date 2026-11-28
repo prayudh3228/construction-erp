@@ -8,3 +8,10 @@ apps/api/src/generated
 playwright-report
 test-results
 .git
+# Editor and tool folders: not part of the app, and some (e.g. .claude) trip Docker Desktop.
+.claude
+.vscode
+.idea
+apps/mobile
+docs
+e2e

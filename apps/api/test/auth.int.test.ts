@@ -98,6 +98,12 @@ describe('sign-in', () => {
     expect(me.body.user.id).toBe(user.id);
   });
 
+  it('sign-in answers are never cached', async () => {
+    const user = await makeUser();
+    const res = await login(user.username).expect(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
   it('mobile: returns a bearer token and sets no cookie', async () => {
     const user = await makeUser();
     const res = await login(user.username, PASSWORD, 'mobile').expect(200);
@@ -204,7 +210,11 @@ describe('lockout', () => {
     const user = await makeUser();
     await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 5 } });
     await login(user.username).expect(401);
-    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 4 } });
+    // Tries used up with no lock running: the lock starts now, so the account is never stuck.
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(after.lockedUntil?.getTime()).toBe(clock.now().getTime() + 15 * MINUTE);
+    expect(after.failedLoginCount).toBe(0);
+    clock.advance(15 * MINUTE + 1);
     await login(user.username).expect(200);
   });
 

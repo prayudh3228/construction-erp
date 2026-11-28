@@ -1,35 +1,56 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomInt } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  hkdfSync,
+  randomBytes,
+  randomInt,
+} from 'node:crypto';
 
 /**
  * Encrypts small secrets at rest (authenticator secrets) with AES-256-GCM, and makes keyed hashes
- * (recovery codes). The key comes from AUTH_ENCRYPTION_KEY, never from code. Stored values carry
- * a version prefix ("v1:") so the key can be rotated later.
+ * (recovery codes). The master key comes from AUTH_ENCRYPTION_KEY, never from code; separate
+ * subkeys for encryption and hashing are derived from it with HKDF, so one use can never weaken
+ * the other. Stored values carry a version prefix ("v1:") so the key can be rotated later.
  */
+const IV_LENGTH = 12;
+const TAG_LENGTH = 16;
+
 export class SecretBox {
-  private readonly key: Buffer;
+  private readonly encKey: Buffer;
+  private readonly macKey: Buffer;
 
   constructor(base64Key: string) {
-    const key = Buffer.from(base64Key, 'base64');
-    if (key.length !== 32) throw new Error('AUTH_ENCRYPTION_KEY must be 32 bytes, base64-encoded');
-    this.key = key;
+    const master = Buffer.from(base64Key, 'base64');
+    if (master.length !== 32) {
+      throw new Error('AUTH_ENCRYPTION_KEY must be 32 bytes, base64-encoded');
+    }
+    const derive = (info: string) =>
+      Buffer.from(hkdfSync('sha256', master, Buffer.alloc(0), info, 32));
+    this.encKey = derive('erp/totp-secret-encryption/v1');
+    this.macKey = derive('erp/recovery-code-hmac/v1');
   }
 
   encrypt(plain: string): string {
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.key, iv);
+    const iv = randomBytes(IV_LENGTH);
+    const cipher = createCipheriv('aes-256-gcm', this.encKey, iv, { authTagLength: TAG_LENGTH });
     const data = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
     return `v1:${Buffer.concat([iv, tag, data]).toString('base64')}`;
   }
 
-  /** Throws if the value was tampered with or encrypted with another key. */
+  /** Throws if the value was tampered with, truncated, or encrypted with another key. */
   decrypt(stored: string): string {
     if (!stored.startsWith('v1:')) throw new Error('Unknown secret format');
     const raw = Buffer.from(stored.slice(3), 'base64');
-    const iv = raw.subarray(0, 12);
-    const tag = raw.subarray(12, 28);
-    const data = raw.subarray(28);
-    const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
+    // A full IV and a full 16-byte tag, never a shortened tag (which would weaken the check).
+    if (raw.length < IV_LENGTH + TAG_LENGTH + 1) throw new Error('Secret is too short');
+    const iv = raw.subarray(0, IV_LENGTH);
+    const tag = raw.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+    const data = raw.subarray(IV_LENGTH + TAG_LENGTH);
+    const decipher = createDecipheriv('aes-256-gcm', this.encKey, iv, {
+      authTagLength: TAG_LENGTH,
+    });
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
   }
@@ -39,7 +60,7 @@ export class SecretBox {
    * codes are random (about 50 bits), and without the key the stored hashes cannot be tested.
    */
   hash(value: string): string {
-    return createHmac('sha256', this.key).update(`recovery:${value}`).digest('hex');
+    return createHmac('sha256', this.macKey).update(value).digest('hex');
   }
 }
 

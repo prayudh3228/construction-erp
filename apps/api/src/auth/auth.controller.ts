@@ -19,6 +19,7 @@ import {
   SESSION_COOKIE,
   changePasswordRequestSchema,
   mfaCodeRequestSchema,
+  mfaConfirmRequestSchema,
   mfaVerifyRequestSchema,
   type MfaEnableResponse,
   type MfaSetupResponse,
@@ -201,8 +202,10 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<MfaEnableResponse> {
-    const { code } = parseBody(mfaCodeRequestSchema, body);
-    const result = await this.throttled(req, () => this.mfa.enable(auth, code, meta(req)));
+    const { code, password } = parseBody(mfaCodeRequestSchema, body);
+    const result = await this.throttled(req, () =>
+      this.mfa.enable(auth, code, password, meta(req)),
+    );
     const session = this.respondWithSession(result, clientOfSession(result), res);
     return { ...session, recoveryCodes: result.recoveryCodes };
   }
@@ -233,9 +236,9 @@ export class AuthController {
     @Body() body: unknown,
     @Req() req: Request,
   ): Promise<{ recoveryCodes: string[] }> {
-    const { code } = parseBody(mfaCodeRequestSchema, body);
+    const { code, password } = parseBody(mfaConfirmRequestSchema, body);
     const recoveryCodes = await this.throttled(req, () =>
-      this.mfa.regenerateRecoveryCodes(auth, code),
+      this.mfa.regenerateRecoveryCodes(auth, code, password),
     );
     return { recoveryCodes };
   }
@@ -250,8 +253,8 @@ export class AuthController {
     @Body() body: unknown,
     @Req() req: Request,
   ): Promise<MeResponse> {
-    const { code } = parseBody(mfaCodeRequestSchema, body);
-    const user = await this.throttled(req, () => this.mfa.disable(auth, code));
+    const { code, password } = parseBody(mfaConfirmRequestSchema, body);
+    const user = await this.throttled(req, () => this.mfa.disable(auth, code, password));
     return { user: this.auth.toAuthUser(user), session: this.auth.sessionInfo(auth.session) };
   }
 

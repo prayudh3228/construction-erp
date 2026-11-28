@@ -23,3 +23,15 @@ export function demoTwoFactorSeed(): Seed {
     },
   };
 }
+
+/**
+ * The way secrets are encrypted changed (separate derived keys, Phase 2b review): store the demo
+ * secret again so databases seeded before the change can still decrypt it.
+ */
+export function demoTwoFactorRekeySeed(): Seed {
+  return {
+    ...demoTwoFactorSeed(),
+    name: '0003-demo-two-factor-rekey',
+    description: 'Re-encrypt the demo.admin secret with derived keys.',
+  };
+}

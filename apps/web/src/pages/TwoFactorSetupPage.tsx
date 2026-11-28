@@ -36,6 +36,9 @@ export function TwoFactorSetupPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  /** An ordinary signed-in session must confirm the password (a stolen session cannot enrol). */
+  const [needPassword, setNeedPassword] = useState(session?.info.stage === 'full');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [enabled, setEnabled] = useState<MfaEnableResponse | null>(null);
@@ -69,15 +72,23 @@ export function TwoFactorSetupPage() {
       setError('Enter the 6-digit code your app shows now.');
       return;
     }
+    if (needPassword && !password) {
+      setError('Enter your password to confirm.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      setEnabled(await authClient().mfaEnable(code));
+      setEnabled(await authClient().mfaEnable(code, needPassword ? password : undefined));
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
         clearSession(queryClient);
         await navigate({ to: '/login', search: { reason: 'expired' } });
         return;
+      }
+      if (isApiError(err) && err.code === 'WRONG_CURRENT_PASSWORD') {
+        setNeedPassword(true);
+        setPassword('');
       }
       setError(isApiError(err) ? err.message : 'Could not check the code. Please try again.');
       setCode('');
@@ -159,6 +170,16 @@ export function TwoFactorSetupPage() {
             </li>
             <li>Enter the 6-digit code the app shows.</li>
           </ol>
+          {needPassword && (
+            <FormField label="Your password" hint="To confirm it is you." required>
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </FormField>
+          )}
           <FormField label="6-digit code" error={error ?? undefined} required>
             <Input
               inputMode="numeric"

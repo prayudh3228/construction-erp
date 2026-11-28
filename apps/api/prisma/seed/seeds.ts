@@ -1,5 +1,5 @@
 import { type PrismaClient } from '../../src/generated/prisma/client';
-import { demoTwoFactorSeed } from './demo-two-factor';
+import { demoTwoFactorRekeySeed, demoTwoFactorSeed } from './demo-two-factor';
 import { demoUsersSeed } from './demo-users';
 
 /**
@@ -25,4 +25,5 @@ export const seeds: Seed[] = [
   },
   demoUsersSeed(),
   demoTwoFactorSeed(),
+  demoTwoFactorRekeySeed(),
 ];
