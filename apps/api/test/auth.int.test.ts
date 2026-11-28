@@ -277,6 +277,7 @@ describe('sessions and timeouts', () => {
     const start = clock.now().getTime();
     expect(res.body.session).toEqual({
       stage: 'full',
+      passwordConfirmNeeded: true,
       idleExpiresAt: new Date(start + 30 * MINUTE).toISOString(),
       absoluteExpiresAt: new Date(start + 12 * HOUR).toISOString(),
       idleTimeoutSeconds: 30 * 60,

@@ -51,6 +51,11 @@ export type SessionStage = (typeof SESSION_STAGES)[number];
 
 export const sessionInfoSchema = z.object({
   stage: z.enum(SESSION_STAGES),
+  /**
+   * True when sensitive changes (switching two-factor on or off, new recovery codes) must ask for
+   * the password again; false right after it was typed at sign-in.
+   */
+  passwordConfirmNeeded: z.boolean(),
   /** ISO instants. The session ends at whichever comes first. */
   idleExpiresAt: z.string(),
   absoluteExpiresAt: z.string(),

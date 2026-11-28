@@ -261,14 +261,14 @@ describe('the second step of sign-in', () => {
 
   it('signing in again does not reset the count: someone with the password cannot keep guessing codes', async () => {
     const user = await makeUser({ mfa: true });
-    // Each round: the right password (1 try) and a wrong code (1 try). Nothing resets in between.
-    const r1 = cookieOf(await login(user.username).expect(200));
-    await post('/mfa/verify', r1, { code: '000000' }).expect(400);
-    const r2 = cookieOf(await login(user.username).expect(200));
-    await post('/mfa/verify', r2, { code: '000000' }).expect(400);
-    const r3 = cookieOf(await login(user.username).expect(200));
-    // 5th try in a row: the account locks.
-    await post('/mfa/verify', r3, { code: '000000' }).expect(401);
+    // Each round: the right password (no try used) and a wrong code (1 try). Signing in again
+    // never resets the count, so after 5 wrong codes in total the account locks.
+    for (let i = 0; i < 4; i++) {
+      const round = cookieOf(await login(user.username).expect(200));
+      await post('/mfa/verify', round, { code: '000000' }).expect(400);
+    }
+    const last = cookieOf(await login(user.username).expect(200));
+    await post('/mfa/verify', last, { code: '000000' }).expect(401);
     const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(row.lockedUntil).not.toBeNull();
     await login(user.username).expect(401);
@@ -276,6 +276,21 @@ describe('the second step of sign-in', () => {
     clock.advance(15 * MINUTE + 1);
     const again = cookieOf(await login(user.username).expect(200));
     await post('/mfa/verify', again, { code: codeNow() }).expect(200);
+  });
+
+  it('earlier typos do not lock out someone who then gets the password and code right', async () => {
+    const user = await makeUser({ mfa: true });
+    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 4 } });
+    const cookie = cookieOf(await login(user.username).expect(200));
+    await post('/mfa/verify', cookie, { code: codeNow() }).expect(200);
+  });
+
+  it('tells the client when changes need the password again', async () => {
+    const user = await makeUser({ mfa: true });
+    const pending = await login(user.username).expect(200);
+    expect(pending.body.session.passwordConfirmNeeded).toBe(false);
+    const full = await post('/mfa/verify', cookieOf(pending), { code: codeNow() }).expect(200);
+    expect(full.body.session.passwordConfirmNeeded).toBe(true);
   });
 
   it('a right code resets the count', async () => {
@@ -289,8 +304,8 @@ describe('the second step of sign-in', () => {
 
   it('wrong codes count towards the lockout; at the limit the account locks and the session ends', async () => {
     const user = await makeUser({ mfa: true });
-    const cookie = cookieOf(await login(user.username)); // the password used 1 try
-    for (let i = 0; i < 3; i++) await post('/mfa/verify', cookie, { code: '000000' }).expect(400);
+    const cookie = cookieOf(await login(user.username));
+    for (let i = 0; i < 4; i++) await post('/mfa/verify', cookie, { code: '000000' }).expect(400);
     await post('/mfa/verify', cookie, { code: '000000' }).expect(401);
     await http().get('/api/auth/me').set('Cookie', cookie).expect(401);
     const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });

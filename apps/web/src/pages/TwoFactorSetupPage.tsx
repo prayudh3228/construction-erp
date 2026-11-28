@@ -38,7 +38,7 @@ export function TwoFactorSetupPage() {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   /** An ordinary signed-in session must confirm the password (a stolen session cannot enrol). */
-  const [needPassword, setNeedPassword] = useState(session?.info.stage === 'full');
+  const [needPassword, setNeedPassword] = useState(session?.info.passwordConfirmNeeded ?? true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [enabled, setEnabled] = useState<MfaEnableResponse | null>(null);

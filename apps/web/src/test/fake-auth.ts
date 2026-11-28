@@ -41,6 +41,7 @@ export function fakeMe(
     },
     session: {
       stage: 'full',
+      passwordConfirmNeeded: (session.stage ?? 'full') === 'full',
       idleExpiresAt: new Date(now + 30 * 60_000).toISOString(),
       absoluteExpiresAt: new Date(now + 12 * 3_600_000).toISOString(),
       idleTimeoutSeconds: 30 * 60,
@@ -139,7 +140,7 @@ export class FakeAuth implements AuthClient {
   }));
 
   mfaEnable = vi.fn(async (code: string, password?: string) => {
-    if (this.current?.session.stage === 'full' && password !== FAKE_PASSWORD) {
+    if (this.current?.session.passwordConfirmNeeded && password !== FAKE_PASSWORD) {
       throw new ApiRequestError(
         400,
         'WRONG_CURRENT_PASSWORD',

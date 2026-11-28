@@ -12,6 +12,7 @@ describe('timeoutState', () => {
   const start = Date.parse('2026-11-26T04:30:00Z');
   const info = {
     stage: 'full' as const,
+    passwordConfirmNeeded: true,
     idleExpiresAt: new Date(start + 30 * MIN).toISOString(),
     absoluteExpiresAt: new Date(start + 12 * 60 * MIN).toISOString(),
     idleTimeoutSeconds: 30 * 60,

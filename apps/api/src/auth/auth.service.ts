@@ -121,11 +121,12 @@ export class AuthService {
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        // With a code still to come the reserved try stays counted: only a right code resets the
-        // counter. Otherwise someone with the password could sign in again after every few wrong
-        // codes and guess forever.
+        // With a code still to come the counter is NOT reset (only a right code does that), or
+        // someone with the password could sign in again after every few wrong codes and guess
+        // forever. The right password itself does not use up a try either, so a person who gets
+        // both right is never locked out by their own earlier typos.
         ...(stage === 'MFA_VERIFY'
-          ? {}
+          ? { failedLoginCount: { decrement: 1 } }
           : { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now }),
         ...(passwordHash ? { passwordHash } : {}),
       },
@@ -479,10 +480,11 @@ export class AuthService {
     };
   }
 
-  sessionInfo(session: Session): SessionInfo {
+  sessionInfo(session: Session, freshFromPassword = false): SessionInfo {
     const idleMs = this.idleTimeoutMs(session.client);
     return {
       stage: STAGE_NAMES[session.stage],
+      passwordConfirmNeeded: !freshFromPassword,
       idleExpiresAt: new Date(session.lastSeenAt.getTime() + idleMs).toISOString(),
       absoluteExpiresAt: session.expiresAt.toISOString(),
       idleTimeoutSeconds: Math.round(idleMs / 1000),

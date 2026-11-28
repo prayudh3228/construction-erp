@@ -137,7 +137,10 @@ export class AuthController {
   @AllowDuringMfa()
   @ApiOperation({ summary: 'The signed-in user and when the session ends' })
   me(@CurrentAuth() auth: Authenticated): MeResponse {
-    return { user: this.auth.toAuthUser(auth.user), session: this.auth.sessionInfo(auth.session) };
+    return {
+      user: this.auth.toAuthUser(auth.user),
+      session: this.auth.sessionInfo(auth.session, auth.freshFromPassword),
+    };
   }
 
   @Get('sessions')
@@ -255,7 +258,10 @@ export class AuthController {
   ): Promise<MeResponse> {
     const { code, password } = parseBody(mfaConfirmRequestSchema, body);
     const user = await this.throttled(req, () => this.mfa.disable(auth, code, password));
-    return { user: this.auth.toAuthUser(user), session: this.auth.sessionInfo(auth.session) };
+    return {
+      user: this.auth.toAuthUser(user),
+      session: this.auth.sessionInfo(auth.session, auth.freshFromPassword),
+    };
   }
 
   private respondWithSession(
@@ -265,7 +271,7 @@ export class AuthController {
   ): LoginResponse {
     const body: LoginResponse = {
       user: this.auth.toAuthUser(result.user),
-      session: this.auth.sessionInfo(result.session),
+      session: this.auth.sessionInfo(result.session, result.freshFromPassword),
     };
     if (client === 'mobile') return { ...body, token: result.token };
     res.cookie(SESSION_COOKIE, result.token, {

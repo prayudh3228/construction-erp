@@ -106,8 +106,9 @@ export class MfaService {
       await tx.recoveryCode.createMany({
         data: recoveryCodes.map((c) => ({ userId: user.id, codeHash: this.box.hash(c) })),
       });
-      return tx.user.update({
-        where: { id: user.id },
+      // Only if still off: two sessions confirming at the same moment cannot both win.
+      const switched = await tx.user.updateMany({
+        where: { id: user.id, totpEnabledAt: null },
         data: {
           totpSecret: this.box.encrypt(secret),
           totpEnabledAt: now,
@@ -116,6 +117,14 @@ export class MfaService {
           lastLoginAt: now,
         },
       });
+      if (switched.count === 0) {
+        throw apiError(
+          HttpStatus.CONFLICT,
+          'MFA_ALREADY_ENABLED',
+          'Two-factor sign-in is already on.',
+        );
+      }
+      return tx.user.findUniqueOrThrow({ where: { id: user.id } });
     });
     // Other sessions were opened without two-factor: end them all, continue on a new one.
     await this.auth.revokeAllSessions(user.id, 'mfa_enabled');
