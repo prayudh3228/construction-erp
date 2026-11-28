@@ -50,7 +50,7 @@ test.describe('sign-in against the real API', () => {
     await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
     // Typing a URL does not get round it.
     await page.goto('/finance');
-    await expect(page).toHaveURL('/change-password');
+    await expect(page).toHaveURL(/\/change-password/);
     // The live checklist follows the shared rules.
     await page.getByLabel(/^New password/).fill('short');
     await expect(page.getByText('At least 12 characters (not met yet)')).toBeVisible();

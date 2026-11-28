@@ -59,7 +59,12 @@ test.describe('two-factor sign-in against the real API', () => {
     await page.getByLabel(/6-digit code/).fill(totp(DEMO_TOTP_SECRET));
     await page.getByRole('button', { name: 'Verify' }).click();
     const signedIn = page.getByRole('button', { name: 'Account menu for Demo Admin' });
-    if (!(await signedIn.isVisible({ timeout: 5_000 }).catch(() => false))) {
+    // isVisible() does not wait; waitFor does.
+    const inFirstTry = await signedIn
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!inFirstTry) {
       while (Math.floor(Date.now() / 30_000) === firstStep) await page.waitForTimeout(500);
       await page.getByLabel(/6-digit code/).fill(totp(DEMO_TOTP_SECRET));
       await page.getByRole('button', { name: 'Verify' }).click();
